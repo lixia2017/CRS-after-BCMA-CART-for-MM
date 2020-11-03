@@ -1,0 +1,72 @@
+## 
+### ---------------
+### Date: 2020-2-27 
+### Step5:cell cycle analysis
+### ---------------
+
+rm(list = ls())
+cellcyclemarker=read.csv("cell cycle marker.csv")
+cellcyclemarker_S=cellcyclemarker[1:151,2]
+cellcyclemarker_G2M=cellcyclemarker[1:201,4]
+s.genes=cellcyclemarker_S
+g2m.genes=cellcyclemarker_G2M
+
+library("scran")
+library(org.Mm.eg.db)
+library(stringr)
+library(Seurat)
+
+################################# GSE70657 Seurat ################################################
+GSE70657=as.matrix(read.table('E:/jinegnshu/mining data/code/rawdata/GSE70657_Grover.A_et.al_RefSeq.Read.Count.txt/GSE70657_Grover.A_et.al_RefSeq.Read.Count.txt',row.names= 1,
+                              header = T ,sep = '\t'))
+for (i in 1:nrow(GSE70657)){rownames(GSE70657)[i]=toupper(rownames(GSE70657)[i])}
+young_GSE70657=GSE70657[,str_detect(colnames(GSE70657),"young")]
+old_GSE70657=GSE70657[,str_detect(colnames(GSE70657),"old")]
+
+young_GSE706571<- CreateSeuratObject(counts =young_GSE70657, project = "young_GSE70657",min.cells =4,min.features = 100)
+young_GSE706571= NormalizeData(young_GSE706571)  
+young_GSE706571 <- CellCycleScoring(young_GSE706571, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+old_GSE706571<- CreateSeuratObject(counts =old_GSE70657, project = "old_GSE70657",min.cells =4,min.features = 100)
+old_GSE706571=NormalizeData(old_GSE706571)      
+old_GSE706571 <- CellCycleScoring(old_GSE706571, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+################################  GSE100906 Seurat  ##########################################
+GSE100906=read.table('E:/jinegnshu/mining data/code/rawdata/GSE100906_scRNA_rawCounts.txt/GSE100906_scRNA_rawCounts.txt',row.names= 1,
+                     header = T ,sep = '\t')  ##把表达矩阵文件载入R，header=T :保留文件头部信息，row.names= 1 :读取行名， seq='\t'以tap为分隔符
+GSE100906=GSE100906[-34843,]
+GSE100906=GSE100906[-35082,]
+GSE100906=GSE100906[-40658,]
+GSE100906=GSE100906[-40674,]
+for (i in 1:nrow(GSE100906)){rownames(GSE100906)[i]=toupper(rownames(GSE100906)[i])}
+young_GSE100906=as.matrix(GSE100906[,str_detect(colnames(GSE100906),"Young")])
+old_GSE100906=as.matrix(GSE100906[,str_detect(colnames(GSE100906),"Aged")])
+
+
+young_GSE1009061<- CreateSeuratObject(counts =young_GSE100906, project = "young_GSE100906",min.cells =8,min.features =200)
+young_GSE1009061 = NormalizeData(young_GSE1009061)
+young_GSE1009061 <- CellCycleScoring(young_GSE1009061, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+old_GSE1009061<- CreateSeuratObject(counts =old_GSE100906, project = "old_GSE100906",min.cells =8,min.features =200)
+old_GSE1009061 = NormalizeData(old_GSE1009061)
+old_GSE1009061 <- CellCycleScoring(old_GSE1009061, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+################################  GSE100426 Seurat 0407 ##########################################
+a=read.table('E:/jinegnshu/mining data/code/rawdata/GSE100426_SC_counts.txt/SC_counts.txt',row.names= 1,
+             header = T ,sep = '\t')  
+GSE100426=a[,str_detect(colnames(a),"LT")]
+GSE100426=GSE100426[,str_detect(colnames(GSE100426),"nostim")]
+for (i in 1:nrow(GSE100426)){rownames(GSE100426)[i]=toupper(rownames(GSE100426)[i])}
+young_GSE100426=as.matrix(GSE100426[,str_detect(colnames(GSE100426),"young")])
+old_GSE100426=as.matrix(GSE100426[,str_detect(colnames(GSE100426),"old")])
+
+young_GSE1004261<- CreateSeuratObject(counts =young_GSE100426, project = "young_GSE100426", min.features =200 ,min.cells = 0)
+young_GSE1004261 = NormalizeData(young_GSE1004261)
+young_GSE1004261 <- CellCycleScoring(young_GSE1004261, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+old_GSE1004261<- CreateSeuratObject(counts =old_GSE100426, project = "old_GSE100426", min.features =200,min.cells = 0)
+old_GSE1004261 = NormalizeData(old_GSE1004261)
+old_GSE1004261 <- CellCycleScoring(old_GSE1004261, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
