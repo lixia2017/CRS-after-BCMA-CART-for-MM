@@ -50,7 +50,7 @@ younghsc@netP$pathways
 [31] "ANGPT"      "COMPLEMENT" "PARs"       "NPR2"       "HGF"     
 [36] "ANNEXIN"    "GAS"        "GRN"        "GALECTIN"   "BTLA"  
 
-netVisual_aggregate(younghsc,signaling="MIF",layout="circle")
+netVisual_aggregate(younghsc,signaling="IL2",layout="circle")
 
 
 saveRDS(younghsc,"xx.rds")
