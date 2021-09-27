@@ -1,0 +1,63 @@
+
+############ step 1  merge three dataset #################
+library(Seurat)
+library(stringr)
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+rm(list = ls())  
+GSE100426=read.table('GSE100426_SC_counts.txt/SC_counts.txt',row.names= 1,
+                     header = T ,sep = '\t')  
+GSE100426=GSE100426[,str_detect(colnames(GSE100426)[],"LT_")]
+GSE100426=GSE100426[,str_detect(colnames(GSE100426)[],"nostim")]
+
+GSE100906=read.table('GSE100906_scRNA_rawCounts.txt/GSE100906_scRNA_rawCounts.txt',row.names= 1,
+                     header = T ,sep = '\t')  
+
+GSE70657=read.table('E:/jinegnshu/mining data/code/rawdata/GSE70657_Grover.A_et.al_RefSeq.Read.Count.txt/GSE70657_Grover.A_et.al_RefSeq.Read.Count.txt',row.names= 1,
+                    header = T ,sep = '\t')  
+
+commongene=intersect(intersect(rownames(GSE100426),rownames(GSE100906)),rownames(GSE70657)) 
+
+GSE100426=GSE100426[commongene,]
+GSE100906=GSE100906[commongene,]
+GSE70657  =GSE70657[commongene,]
+
+mergedata=cbind(GSE100426,GSE100906,GSE70657)
+
+mergedata<- CreateSeuratObject(counts = mergedata, project = "mergedata")
+mergedata$dataset="GSE"
+for (i in 1:320)   {mergedata$dataset[i]="GSE100426"}
+for (i in 321:469) {mergedata$dataset[i]="GSE100906"}
+for (i in 470:605) {mergedata$dataset[i]="GSE70657"}
+mergedata=subset(mergedata,nFeature_RNA>500)
+mergedata1.list <- SplitObject(mergedata, split.by = "dataset")
+
+for (i in 1:length(mergedata1.list)) {
+  mergedata1.list[[i]] <- NormalizeData(mergedata1.list[[i]], verbose = FALSE)
+  mergedata1.list[[i]] <- FindVariableFeatures(mergedata1.list[[i]], selection.method = "vst", 
+                                               nfeatures = 2000, verbose = FALSE)
+}
+
+mergedata.anchors <- FindIntegrationAnchors(object.list = mergedata1.list, dims = 1:30,k.filter = 120,k.anchor = 5,anchor.features = 6000)
+
+mergedata.integrated <- IntegrateData(anchorset = mergedata.anchors, dims = 1:30)
+
+DefaultAssay(mergedata.integrated) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+mergedata.integrated <- ScaleData(mergedata.integrated, verbose = FALSE)
+mergedata.integrated <- RunPCA(mergedata.integrated, npcs = 30, verbose = FALSE)
+mergedata.integrated <- RunUMAP(mergedata.integrated, reduction = "pca", dims = 1:30)
+p1 <- DimPlot(mergedata.integrated, reduction = "umap", group.by = "dataset")
+p1
+
+mergedata.integrated=RunTSNE(mergedata.integrated)
+TSNEPlot(object = mergedata.integrated)
+
+
+####### clustering ###############
+mergedata.integrated <- FindNeighbors(mergedata.integrated, dims = 1:10)
+mergedata.integrated <- FindClusters(mergedata.integrated, resolution = 0.8)
+Idents(mergedata.integrated)=mergedata.integrated@meta.data$integrated_snn_res.0.8
+TSNEPlot(object = mergedata.integrated,pt.size=2.5)
