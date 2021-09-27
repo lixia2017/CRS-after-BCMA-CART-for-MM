@@ -1,0 +1,50 @@
+## 
+### ---------------
+### Date: 2020-2-25 
+### Step5: find common DEG, GO and KEGG figure
+### ---------------
+
+rm(list = ls())  
+load("GSE100426_DESeq2_0.6_0.05_markers.Rdata")
+GSE100426_markers=markers
+load("GSE100906_DESeq2_0.6_0.05_markers.Rdata")
+GSE100906_markers=markers
+load("GSE70657_DESeq2_0.6_0.05_markers.Rdata")
+GSE70657_markers=markers
+
+library(stringr)
+
+GSE100426_markers=GSE100426_markers[!duplicated(GSE100426_markers$`gene`),]
+GSE100906_markers=GSE100906_markers[!duplicated(GSE100906_markers$`gene`),]
+GSE70657_markers=GSE70657_markers[!duplicated(GSE70657_markers$`gene`),]
+
+GSE70657_markers[,2]=-GSE70657_markers[,2]
+GSE70657_markers[,6]="old"
+
+rownames(GSE59114_C57BL6_markers)=str_replace_all(rownames(GSE59114_C57BL6_markers),'\'',"")
+GSE59114_C57BL6_markers$gene=str_replace_all(GSE59114_C57BL6_markers$gene,'\'',"")
+
+rownames(GSE100426_markers)=paste("GSE100426",rownames(GSE100426_markers),sep = "_")
+rownames(GSE100906_markers)=paste("GSE100906",rownames(GSE100906_markers),sep = "_")
+rownames(GSE59114_C57BL6_markers)=paste("GSE59114_C57BL6",rownames(GSE59114_C57BL6_markers),sep = "_")
+rownames(GSE59114_DBA_markers)=paste("GSE59114_DBA",rownames(GSE59114_DBA_markers),sep = "_")
+rownames(GSE70657_markers)=paste("GSE70657",rownames(GSE70657_markers),sep = "_")
+
+merge_data=rbind(GSE100426_markers,GSE100906_markers,GSE59114_C57BL6_markers,GSE59114_DBA_markers,GSE70657_markers)
+
+merge_data[,8]=(merge_data[,2]>0)
+for (i in 1:nrow(merge_data)){
+   if (merge_data[i,8])  merge_data[i,8]=1
+   if (!merge_data[i,8])  merge_data[i,8]=-1   
+}
+
+times=matrix(data=NA, nrow = nrow(as.matrix(unique(significant_data[,7]))), ncol = 2)
+times[,1]=as.matrix(unique(significant_data[,7]))
+for (i in 1: nrow(times)){
+  times[i,2]=sum(merge_data[significant_data[,7]==times[i,1],8])
+}
+
+gene_list=subset(times,!(as.numeric(times[,2])>-3 & as.numeric(times[,2])<3))
+
+save(gene_list,file="gene_list_0.6_0.05.Rdata")
+write.csv(gene_list,"gene_list_0.6_0.05.csv")
