@@ -1,0 +1,57 @@
+## 
+### ---------------
+### Date: 2020-2-27 
+### Step8:cellchat analysis of BM 
+### ---------------
+
+
+younghsc<- createCellChat(object = younghsc, meta=young_meta)
+oldhsc<-createCellChat(object = oldhsc, meta=old_meta)
+
+CellChatDB <- CellChatDB.mouse # use CellChatDB.mouse if running on mouse data
+showDatabaseCategory(CellChatDB)
+
+CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling") # use Secreted Signaling
+CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+
+
+# subset the expression data of signaling genes for saving computation cost
+younghsc@DB <- CellChatDB
+oldhsc@DB <- CellChatDB
+younghsc <- subsetData(younghsc ) # This step is necessary even if using the whole database
+oldhsc <- subsetData(oldhsc)
+
+future::plan("multiprocess", workers = 4) # do parallel
+#> Warning: [ONE-TIME WARNING] Forked processing ('multicore') is disabled
+#> in future (>= 1.13.0) when running R from RStudio, because it is
+#> considered unstable. Because of this, plan("multicore") will fall
+#> back to plan("sequential"), and plan("multiprocess") will fall back to
+#> plan("multisession") - not plan("multicore") as in the past. For more details,
+#> how to control forked processing or not, and how to silence this warning in
+#> future R sessions, see ?future::supportsMulticore
+oldhsc <- identifyOverExpressedGenes(oldhsc)
+oldhsc <- identifyOverExpressedInteractions(oldhsc)
+younghsc <- identifyOverExpressedGenes(younghsc)
+younghsc <- identifyOverExpressedInteractions(younghsc)
+# project gene expression data onto PPI network (optional)
+oldhsc<- projectData(oldhsc, PPI.mouse)
+younghsc <- projectData(younghsc, PPI.mouse)
+
+############### 
+oldhsc <- computeCommunProb(oldhsc)
+younghsc <- computeCommunProb(younghsc)
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+oldhsc <- filterCommunication(oldhsc, min.cells = 10)
+younghsc <- filterCommunication(younghsc, min.cells = 10)
+
+oldhsc <- computeCommunProbPathway(oldhsc)
+younghsc <- computeCommunProbPathway(younghsc)
+
+oldhsc <- aggregateNet(oldhsc)
+younghsc <- aggregateNet(younghsc)
+
+groupSize <- as.numeric(table(younghsc@idents)) # number of cells in each cell group
+
+saveRDS(younghsc,"younghsc.rds")
+saveRDS(oldhsc,"oldhsc.rds")
+
