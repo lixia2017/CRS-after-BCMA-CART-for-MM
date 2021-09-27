@@ -1,0 +1,35 @@
+## 
+### ---------------
+### Date: 2020-2-24 
+### Step2:load GSE70657 expression file and filter,find DEG
+### ---------------
+
+# read data
+a=read.table('GSE70657.txt',row.names= 1, header = T ,sep = '\t')  
+# check data
+a[1:6,1:4] 
+
+library(dplyr)
+library(Seurat)
+library(stringr)
+# Create Seurat Object
+GSE70657<- CreateSeuratObject(counts = a, project = "GSE70657", min.cells = 3, min.features = 200)
+
+Idents(GSE70657)=str_split(colnames(GSE70657),'_',simplify = T)[,2]  #字符串分割
+
+# Visualize QC metrics as a violin plot
+VlnPlot(GSE70657, features = c("nFeature_RNA", "nCount_RNA"), ncol = 2)
+
+#data filtering
+GSE70657 <- subset(GSE70657, subset = nFeature_RNA < 7000)
+GSE70657 <- subset(GSE70657, subset = nFeature_RNA < 6000)
+
+#data normalization
+GSE70657 <- NormalizeData(GSE70657, normalization.method = "LogNormalize", scale.factor = 10000)  
+GSE70657 <- FindVariableFeatures(GSE70657, selection.method = "vst", nfeatures = 2000)  
+GSE70657 <- ScaleData(GSE70657)
+
+#find DEGs
+markers <- FindAllMarkers(GSE70657,  logfc.threshold =0.6,test.use = "DESeq2", return.thresh=0.05)
+save(markers,file="GSE70657_DESeq2_0.6_0.05_markers.Rdata")
+write.csv(markers,"GSE70657.csv")
