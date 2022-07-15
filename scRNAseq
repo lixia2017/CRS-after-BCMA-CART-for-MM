@@ -1,0 +1,14 @@
+##scRNA-seq
+# Alignment and generates cells × genes raw counts matrix
+~/software/10X/cellranger-3.0.0/cellranger count --id=FHJ_S1 --transcriptome=~/software/10X/refdata-cellranger-GRCh38-3.0.0 --fastqs=/mnt/FHJ/S1 --localcores=128 --localmem=128 
+
+
+
+
+##scTCR-seq  
+#BSUB -J FHJ_TCR
+#BSUB -q normal
+#BSUB -n 64
+#BSUB -o errorReport.txt
+#BSUB -e %J.err
+/home/hcb-lab/software/10X/cellranger-3.0.0/cellranger vdj --id=FHJ_T1 --reference=/home/hcb-lab/FHJ_TCR_rawdata/refdata-cellranger-vdj-GRCh38-alts-ensembl-3.1.0 --fastqs=/home/hcb-lab/FHJ_TCR_rawdata/TCR_8
