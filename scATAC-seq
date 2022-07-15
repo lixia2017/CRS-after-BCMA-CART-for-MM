@@ -1,0 +1,191 @@
+##----------------scATAC-seq data pre-processing using cellranger-atac------------------##
+# Alignment, deduplication, peak calling and generating a cells × peaks raw counts matrix
+cellranger-atac count --id=sample_name
+    --reference=refdata-cellranger-atac-GRCh38-1.1.0   
+    --fastqs=fastq_files_directory
+    --sample=sample_name
+
+# Aggregate all samples
+cellranger-atac aggr --id=sample_aggr  
+    --csv=sample_aggr.csv    
+    --normalize=none     
+    --reference=refdata-cellranger-atac-GRCh38-1.1.0
+
+
+# The following process is done in R
+
+##----------------Creat a seurat object using peak matrix------------------##
+library(cowplot)
+library(readr)
+library(Seurat)
+library(dplyr)
+library(tidyr)
+library(harmony)
+library(Matrix)
+library(Signac)
+library(GenomeInfoDb)
+library(EnsDb.Hsapiens.v86)
+library(chromVAR)
+library(scales)
+library(reshape2)
+library(ChIPseeker)
+library(TFBSTools)
+library(chromVAR)
+library(motifmatchr)
+library(SummarizedExperiment)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(chromVARmotifs)
+data("human_pwms_v2")
+
+# raw peak matrix
+accmat <- Read10X_h5("sample_aggr/outs/filtered_peak_bc_matrix.h5")
+
+metadata1 <- read.csv( file = "sample1/outs/singlecell.csv", header = TRUE, row.names = 1)
+metadata2 <- read.csv( file = "sample2/outs/singlecell.csv", header = TRUE, row.names = 1)
+row.names(metadata2) <- gsub("-1","-2",row.names(metadata2))
+metadata3 <- read.csv( file = "sample3/outs/singlecell.csv", header = TRUE, row.names = 1)
+row.names(metadata3) <- gsub("-1","-3",row.names(metadata3))
+metadata4 <- read.csv( file = "sample4/outs/singlecell.csv", header = TRUE, row.names = 1)
+row.names(metadata4) <- gsub("-1","-4",row.names(metadata4))
+metadata5 <- read.csv( file = "sample5/outs/singlecell.csv", header = TRUE, row.names = 1)
+row.names(metadata5) <- gsub("-1","-5",row.names(metadata5))
+metadata6 <- read.csv( file = "sample6/outs/singlecell.csv", header = TRUE, row.names = 1)
+row.names(metadata6) <- gsub("-1","-6",row.names(metadata6))
+
+metadata <- rbind(metadata1,metadata2,metadata3,metadata4,metadata5,metadata6)
+metadata <- metadata[which(metadata$is__cell_barcode==1),]
+
+# creat a seurat object
+atac <- CreateSeuratObject( counts = accmat, project = 'ATAC', meta.data = metadata)
+
+# remove Y chromosome
+metadata <- atac@meta.data
+
+chrom_assay <- CreateChromatinAssay(
+  counts = atac@assays$RNA@counts[-grep('chrY',row.names(atac)), ],
+  sep = c(":", "-"),
+  genome = 'hg38',
+  fragments = 'fragments.tsv.gz',
+  min.cells = 10,
+  min.features = 200
+)
+
+atac <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "peaks",
+  meta.data = metadata
+)
+
+# extract gene annotations from EnsDb
+annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+
+# change to UCSC style since the data was mapped to hg19
+seqlevelsStyle(annotations) <- 'UCSC'
+genome(annotations) <- "hg38"
+
+# add the gene information to the object
+Annotation(atac) <- annotations
+
+
+##----------------QC------------------##
+# add blacklist ratio and fraction of reads in peaks
+atac$pct_reads_in_peaks <- atac$peak_region_fragments / atac$total * 100
+atac$blacklist_ratio <- atac$blacklist_region_fragments / atac$peak_region_fragments
+atac$mitochondrial_ratio <- atac$mitochondrial/atac$total* 100
+atac$logCount <- log10(atac$peak_region_fragments)
+atac$pct_reads_in_promoter <- atac$promoter_region_fragments/atac$total
+atac$pct_on_target_fragments <- atac$on_target_fragments/atac$total
+
+# compute nucleosome signal score per cell
+atac <- NucleosomeSignal(object = atac)
+
+# compute TSS enrichment score per cell
+atac <- TSSEnrichment(object = atac, fast = FALSE)
+
+# filter out poor quality cells
+atac <- subset(atac, subset = peak_region_fragments > 5000 & peak_region_fragments < 50000  & blacklist_ratio < 0.01 & nucleosome_signal < 10 & pct_reads_in_peaks > 20 & mitochondrial_ratio<0.2 & TSS.enrichment > 2 )
+
+
+
+##----------------Dimension reduction and clustering------------------##
+atac <- FindTopFeatures(atac, min.cutoff = 10)
+atac <- RunTFIDF(atac)
+atac <- RunSVD(atac)
+atac <- RunHarmony(atac, group.by.vars = "sampleid",theta=2,lambda=1, plot_convergence = T, reduction = 'lsi',assay.use = 'peaks') 
+
+# The second Harmony component is removed because it is related to sequencing depth
+atac <- RunUMAP(atac, reduction = "harmony", dims =c(1,3:20),min.dist=0.3)
+atac <- FindNeighbors(atac, reduction = "harmony", dims = c(1,3:20)) %>% FindClusters(resolution=0.8)
+
+
+
+##----------------Create a gene activity matrix------------------##
+gene.activities <- GeneActivity(atac)
+
+# add the gene activity matrix to the Seurat object as a new assay and normalize it
+atac[['ACTIVITY']] <- CreateAssayObject(counts = gene.activities)
+atac <- NormalizeData(
+  object = atac,
+  assay = 'ACTIVITY',
+  normalization.method = 'LogNormalize',
+  scale.factor = median(atac$nCount_RNA)
+)
+
+
+##----------------Create a motif activity matrix------------------##
+
+atac <- AddMotifs(
+  object = atac,
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  pfm = human_pwms_v2
+)
+
+atac <- RunChromVAR(
+  object = atac,
+  genome =  BSgenome.Hsapiens.UCSC.hg38
+)
+
+
+##----------------Downstream analysis------------------##
+
+# identify differential accessibile peaks
+DefaultAssay(pbmc) <- "peaks"
+immune.combined.markers <- FindAllMarkers(pbmc, only.pos = TRUE,logfc.threshold=0.3)
+
+# peaks annotation
+peaks <- separate(peaks,gene,sep = '([\\:\\-])',into = c('chr','start','end'))
+peaks <- peaks[,c(7:9,1:6,10)]
+
+gpeaks <- GRanges(peaks)
+peakAnno <- annotatePeak(gpeaks,tssRegion=c(-3000, 3000), 
+    TxDb=TxDb.Hsapiens.UCSC.hg38.knownGene, annoDb="org.Hs.eg.db")
+
+# enriched motifs
+enriched.motifs <- FindMotifs(object = pbmc, features = head(peaks$gene[which(peaks$cluster==celltype[i])], 1000))
+
+
+
+##----------------scRNA-seq and scATAC-seq data co-embedding------------------##
+# load scRNA-seq data
+rna <- readRDS('scRNA-seq.rds')
+
+DefaultAssay(atac) <- "ACTIVITY"
+transfer.anchors <- FindTransferAnchors(reference = rna, query = atac, features = VariableFeatures(object = rna),
+    reference.assay = "RNA", query.assay = "ACTIVITY", reduction = "cca")
+
+genes.use <- VariableFeatures(rna)
+refdata <- GetAssayData(rna, assay = "RNA", slot = "data")[genes.use, ]
+
+imputation <- TransferData(anchorset = transfer.anchors, refdata = refdata, weight.reduction = atac[["harmony"]],dims =c(1,3:20))
+
+# this line adds the imputed data matrix to the atac object
+atac[["RNA"]] <- imputation
+coembed <- merge(x = rna, y = atac)
+
+# Finally, we run PCA and UMAP on this combined object, to visualize the co-embedding of both datasets
+coembed <- ScaleData(coembed, features = genes.use, do.scale = FALSE)
+coembed <- RunPCA(coembed, features = genes.use, verbose = FALSE)
+coembed <- RunHarmony(coembed, group.by.vars = "samples",theta=2,lambda=1, plot_convergence = T) 
+coembed <- RunUMAP(coembed, dims = 1:30, reduction = "harmony")
+
+  
