@@ -3,8 +3,6 @@
 ~/software/10X/cellranger-3.0.0/cellranger count --id=FHJ_S1 --transcriptome=~/software/10X/refdata-cellranger-GRCh38-3.0.0 --fastqs=/mnt/FHJ/S1 --localcores=128 --localmem=128 
 
 
-
-
 ##scTCR-seq  
 #BSUB -J FHJ_TCR
 #BSUB -q normal
