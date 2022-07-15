@@ -2,6 +2,107 @@
 # Alignment and generates cells × genes raw counts matrix
 ~/software/10X/cellranger-3.0.0/cellranger count --id=FHJ_S1 --transcriptome=~/software/10X/refdata-cellranger-GRCh38-3.0.0 --fastqs=/mnt/FHJ/S1 --localcores=128 --localmem=128 
 
+##
+The codes for import 4 paitents data(one patient pipelien as a example)
+##S1
+S1_dir <- "GEX5_filtered_feature_bc_matrix/"
+S1.barcode.path <- paste0(S1_dir, "barcodes.tsv.gz")
+S1.features.path <- paste0(S1_dir, "features.tsv.gz")
+S1.matrix.path <- paste0(S1_dir, "matrix.mtx.gz")
+
+S1.mat <- readMM(file = S1.matrix.path)
+S1.feature.names = read.delim(S1.features.path,header = FALSE,stringsAsFactors = FALSE)
+S1.barcode.names = read.delim(S1.barcode.path,header = FALSE,stringsAsFactors = FALSE)
+
+colnames(S1.mat) = paste("S1_",S1.barcode.names$V1,sep="")
+rownames(S1.mat) = S1.feature.names$V2
+
+dim(S1.mat)
+S1.mat[1:30,1:30]
+
+##S2
+S2_dir <- "GEX6_filtered_feature_bc_matrix/"
+S2.barcode.path <- paste0(S2_dir, "barcodes.tsv.gz")
+S2.features.path <- paste0(S2_dir, "features.tsv.gz")
+S2.matrix.path <- paste0(S2_dir, "matrix.mtx.gz")
+S2.mat <- readMM(file = S2.matrix.path)
+S2.feature.names = read.delim(S2.features.path, header = FALSE,stringsAsFactors = FALSE)
+
+S2.barcode.names = read.delim(S2.barcode.path, header = FALSE,stringsAsFactors = FALSE)
+colnames(S2.mat) = paste("S2_",S2.barcode.names$V1,sep="")
+rownames(S2.mat) = S2.feature.names$V2
+dim(S2.mat)
+S2.mat[1:30,1:30]
+
+##S3
+S3_dir <- "GEX7_filtered_feature_bc_matrix/"
+S3.barcode.path <- paste0(S3_dir, "barcodes.tsv.gz")
+S3.features.path <- paste0(S3_dir, "features.tsv.gz")
+S3.matrix.path <- paste0(S3_dir, "matrix.mtx.gz")
+S3.mat <- readMM(file = S3.matrix.path)
+S3.feature.names = read.delim(S3.features.path, header = FALSE,stringsAsFactors = FALSE)
+
+S3.barcode.names = read.delim(S3.barcode.path, header = FALSE,stringsAsFactors = FALSE)
+colnames(S3.mat) = paste("S3_",S3.barcode.names$V1,sep="")
+rownames(S3.mat) = S3.feature.names$V2
+
+dim(S3.mat)
+S3.mat[1:30,1:30]
+
+
+##S4
+S4_dir <- "GEX9_filtered_feature_bc_matrix/"
+S4.barcode.path <- paste0(S4_dir, "barcodes.tsv.gz")
+S4.features.path <- paste0(S4_dir, "features.tsv.gz")
+S4.matrix.path <- paste0(S4_dir, "matrix.mtx.gz")
+S4.mat <- readMM(file = S4.matrix.path)
+S4.feature.names = read.delim(S4.features.path,header = FALSE,stringsAsFactors = FALSE)
+S4.barcode.names = read.delim(S4.barcode.path,header = FALSE,stringsAsFactors = FALSE)
+colnames(S4.mat) = paste("S4_",S4.barcode.names$V1,sep="")
+rownames(S4.mat) = S4.feature.names$V2
+dim(S4.mat)
+S4.mat[1:30,1:30]
+
+##S5
+S5_dir <- "GEX1_filtered_feature_bc_matrix/"
+S5.barcode.path <- paste0(S5_dir, "barcodes.tsv.gz")
+S5.features.path <- paste0(S5_dir, "features.tsv.gz")
+S5.matrix.path <- paste0(S5_dir, "matrix.mtx.gz")
+S5.mat <- readMM(file = S5.matrix.path)
+S5.feature.names = read.delim(S5.features.path,header = FALSE,stringsAsFactors = FALSE)
+S5.barcode.names = read.delim(S5.barcode.path,header = FALSE,stringsAsFactors = FALSE)
+colnames(S5.mat) = paste("S5_",S5.barcode.names$V1,sep="")
+rownames(S5.mat) = S5.feature.names$V2
+dim(S5.mat)
+S5.mat[1:30,1:30]
+
+##S6
+S6_dir <- "GEX2_filtered_feature_bc_matrix/"
+S6.barcode.path <- paste0(S6_dir, "barcodes.tsv.gz")
+S6.features.path <- paste0(S6_dir, "features.tsv.gz")
+S6.matrix.path <- paste0(S6_dir, "matrix.mtx.gz")
+S6.mat <- readMM(file = S6.matrix.path)
+S6.feature.names = read.delim(S6.features.path,header = FALSE,stringsAsFactors = FALSE)
+S6.barcode.names = read.delim(S6.barcode.path,header = FALSE,stringsAsFactors = FALSE)
+colnames(S6.mat) = paste("S6_",S6.barcode.names$V1,sep="")
+rownames(S6.mat) = S6.feature.names$V2
+
+dim(S6.mat)
+S6.mat[1:30,1:30]
+
+##S7
+S7_dir <- "GEX4_filtered_feature_bc_matrix/"
+S7.barcode.path <- paste0(S7_dir, "barcodes.tsv.gz")
+S7.features.path <- paste0(S7_dir, "features.tsv.gz")
+S7.matrix.path <- paste0(S7_dir, "matrix.mtx.gz")
+S7.mat <- readMM(file = S7.matrix.path)
+S7.feature.names = read.delim(S7.features.path,header = FALSE,stringsAsFactors = FALSE)
+S7.barcode.names = read.delim(S7.barcode.path,header = FALSE,stringsAsFactors = FALSE)
+colnames(S7.mat) = paste("S7_",S7.barcode.names$V1,sep="")
+rownames(S7.mat) = S7.feature.names$V2
+dim(S7.mat)
+S7.mat[1:30,1:30]
+
 
 ##scTCR-seq  
 #BSUB -J FHJ_TCR
@@ -10,3 +111,4 @@
 #BSUB -o errorReport.txt
 #BSUB -e %J.err
 /home/hcb-lab/software/10X/cellranger-3.0.0/cellranger vdj --id=FHJ_T1 --reference=/home/hcb-lab/FHJ_TCR_rawdata/refdata-cellranger-vdj-GRCh38-alts-ensembl-3.1.0 --fastqs=/home/hcb-lab/FHJ_TCR_rawdata/TCR_8
+
