@@ -1,0 +1,134 @@
+#https://satijalab.org/seurat/v3.1/integration.html#standard-workflow
+
+T.anchors <- FindIntegrationAnchors(object.list = list(P1_S1bj,P1_S2bj,P1_S3bj, P1_S4bj,P1_S5bj,P1_S6bj,P1_S7bj,P2_S1bj,P2_S2bj,P2_S3bj, P2_S4bj,P2_S5bj,P2_S6bj,P2_S7bj,P3_S1bj,P3_S2bj,P3_S3bj, P3_S4bj,P3_S5bj,P3_S6bj,P3_S7bj,P4_S1bj,P4_S2bj,P4_S3bj, P4_S4bj,P4_S5bj,P4_S6bj,P4_S7bj), dims = 1:30)
+
+T.combined <- IntegrateData(anchorset = T.anchors, dims = 1:30)
+DefaultAssay(T.combined) <- "RNA"
+
+# # Run the standard workflow for visualization and clustering
+T.combined <- ScaleData(T.combined, verbose = FALSE)
+T.combined <- FindVariableFeatures(T.combined, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top50 <- head(VariableFeatures(T.combined), 50)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(T.combined)
+
+plot2 <- LabelPoints(plot = plot1, points = top50, repel = TRUE)
+plot1 + plot2
+
+##
+pdf("all_ var_gene.pdf")
+plot2
+dev.off()
+
+
+###
+T.combined <- RunPCA(T.combined, features = VariableFeatures(object = T.combined))
+
+# # t-SNE and Clustering
+T.combined <- RunTSNE(T.combined, reduction = "pca", dims = 1:30)
+T.combined <- FindNeighbors(T.combined, reduction = "pca", dims = 1:30)
+T.combined <- FindClusters(T.combined, resolution = 0.25)  #cluster 13
+T.combined <- FindClusters(T.combined, resolution = 0.4)  ##cluster 15 分辨率越高，cluster越多！ 
+# save(T.combined, file="CART_10X_DYH_TSNE.RData")
+
+##umap
+# Run the standard workflow for visualization and clustering
+
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+# switch to integrated assay. The variable features of this assay are automatically
+# set during IntegrateData
+DefaultAssay(pT.combined) <- " RNA"
+
+# Run the standard workflow for visualization and clustering
+T.combined<- ScaleData(pT.combined, verbose = FALSE)
+T.combined<- RunPCA(pT.combined, npcs = 30, verbose = FALSE)
+T.combined<- RunUMAP(pT.combined, reduction = "pca", dims = 1:30)
+p1 <- DimPlot(pT.combined, reduction = "umap", group.by = "condition")
+p2 <- DimPlot(pT.combined, reduction = "umap", group.by = "celltype", label = TRUE,
+repel = TRUE) + NoLegend()
+p1 + p2
+
+T.combined <- RunTSNE(T.combined, reduction = "pca", dims = 1:30)
+T.combined<- RunUMAP(T.combined, reduction = "pca", dims = 1:30)
+
+
+#load("CART_10X_ZJG_TSNE.RData")
+T.combined$condition[which(T.combined$condition=="S1")] <- "PBMC_Before chem"
+T.combined$condition[which(T.combined$condition=="S2")] <- "PBMC_After chem"
+T.combined$condition[which(T.combined$condition=="S3")] <- "CRS_CRAT-"
+T.combined$condition[which(T.combined$condition=="S4")] <- "Remission_CRAT-"
+T.combined$condition[which(T.combined$condition=="S5")] <- "CD3+CART+"
+T.combined$condition[which(T.combined$condition=="S6")] <- "CRS_CD3+CART+"
+T.combined$condition[which(T.combined$condition=="S7")] <- "Remission_CD3+CART+"
+
+
+##
+T.combined$condition2<-T.combined$condition
+
+T.combined$condition2[which(T.combined$condition=="CRS_CRAT-")] <- "CRS"
+T.combined$condition2[which(T.combined$condition=="Remission_CRAT-")] <- "Remission"
+T.combined$condition2[which(T.combined$condition=="CRS_CD3+CART+")] <- "CRS"
+T.combined$condition2[which(T.combined$condition=="Remission_CD3+CART+")] <- "Remission"
+##
+
+
+order<-c("CD3+CART+","CRS_CD3+CART+","Remission_CD3+CART+","PBMC_Before chem","PBMC_After chem","CRS_CRAT-", "Remission_CRAT-")
+T.combined$condition3<-factor(T.combined$condition,levels=order)
+levels(T.combined$condition3)
+levels(T.combined$condition)
+p3<-DimPlot(T.combined, reduction = "tsne", split.by = "condition3",label=TRUE,ncol=4)
+
+
+library(BiocStyle)
+library(SingleR)
+
+#install.packages("factoextra")
+#BiocManager::install("pcaMethods")
+library(pcaMethods)
+
+#load("CART_10X_ZJG_TSNE.rds")
+
+pbmc<-T.combined
+dim(pbmc@assays$RNA@counts)
+
+#pca.se <- DatabaseImmuneCellExpressionData()
+pca.se <- MonacoImmuneData()
+
+singler = SingleR(pbmc@assays$RNA@counts, method = "single",assay.type.test = "logcounts",ref = pca.se ,labels =pca.se$label.fine )
+
+table(singler$first.labels)
+table(singler$labels)
+
+
+#pbmc<-T.combined
+metadata1<-pbmc@meta.data
+
+singler_cluster = SingleR(pbmc@assays$RNA@counts, method = "cluster",clusters = metadata1$seurat_clusters,assay.type.test = "logcounts",ref = pca.se ,labels =pca.se$label.fine)
+table(singler_cluster$labels)
+table(singler_cluster$first.labels)
+
+
+cell_name <- as.data.frame(singler)
+cell_name[1:3,1:34]
+
+cluster_name<-as.data.frame(singler_cluster)
+cluster_name[1:3,1:34]
+
+write.csv(cell_name,"ZJG_cell_name.csv")
+write.csv(cluster_name,"ZJG_cluster_name.csv")
+
+##p1 p2 p3
+p1 <- DimPlot(T.combined, reduction = "tsne", group.by = "condition",label=T)
+p2 <- DimPlot(T.combined, reduction = "tsne", group.by = "condition4",label=T)
+##
+p1 <- DimPlot(T.combined, reduction = "tsne", group.by = "condition")
+p2 <- DimPlot(T.combined, reduction = "tsne", group.by = "condition4")
+p1+p2
+
+p3<-DimPlot(T.combined, reduction = "tsne", split.by = "condition3",ncol=4,group.by="condition3")
+p4<-DimPlot(T.combined, reduction = "tsne", split.by = "condition",label=TRUE,ncol=7,group.by="condition")
