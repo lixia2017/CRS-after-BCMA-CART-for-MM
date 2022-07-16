@@ -103,3 +103,205 @@ rownames(S7.mat) = S7.feature.names$V2
 dim(S7.mat)
 S7.mat[1:30,1:30]
 
+
+##去除二细胞
+library(scDblFinder)
+
+p4_s1<-s1.mat
+p4_s2<-s2.mat
+p4_s3<-s3.mat
+p4_s4<-s4.mat
+p4_s5<-s5.mat
+p4_s6<-s6.mat
+p4_s7<-s7.mat
+
+count22<-p4_s1
+count23<-p4_s2
+count24<-p4_s3
+count25<-p4_s4
+count26<-p4_s5
+count27<-p4_s6
+count28<-p4_s7
+
+sce <-SingleCellExperiment(assays=list(counts=count22))
+sce <- scDblFinder(sce, verbose=FALSE)
+table(sce$scDblFinder.class)
+doublecell_p4_s1<-sce
+
+sce <-SingleCellExperiment(assays=list(counts=count23))
+sce <- scDblFinder(sce, verbose=FALSE)
+table(sce$scDblFinder.class)
+doublecell_p4_s2<-sce
+
+sce <-SingleCellExperiment(assays=list(counts=count24))
+sce <- scDblFinder(sce, verbose=FALSE)
+table(sce$scDblFinder.class)
+doublecell_p4_s3<-sce
+
+
+sce <-SingleCellExperiment(assays=list(counts=count25))
+sce <- scDblFinder(sce, verbose=FALSE)
+table(sce$scDblFinder.class)
+doublecell_p4_s4<-sce
+
+sce <-SingleCellExperiment(assays=list(counts=count26))
+sce <- scDblFinder(sce, verbose=FALSE)
+table(sce$scDblFinder.class)
+doublecell_p4_s5<-sce
+
+sce <-SingleCellExperiment(assays=list(counts=count27))
+sce <- scDblFinder(sce, verbose=FALSE)
+table(sce$scDblFinder.class)
+doublecell_p4_s6<-sce
+
+sce <-SingleCellExperiment(assays=list(counts=count28))
+sce <- scDblFinder(sce, verbose=FALSE)
+table(sce$scDblFinder.class)
+doublecell_p4_s7<-sce
+
+table(doublecell_p4_s1$scDblFinder.class)
+table(doublecell_p4_s2$scDblFinder.class)
+table(doublecell_p4_s3$scDblFinder.class)
+table(doublecell_p4_s4$scDblFinder.class)
+table(doublecell_p4_s5$scDblFinder.class)
+table(doublecell_p4_s6$scDblFinder.class)
+table(doublecell_p4_s7$scDblFinder.class)
+
+##过滤双细胞
+x<-as.data.frame(doublecell_p4_s1$scDblFinder.class)
+colnames(x)<-"cell"
+head(x)
+p4_s1_filter<-p4_s1[,-c(which(x$cell=="doublet"))]
+dim(p4_s1)
+dim(p4_s1_filter)
+
+x<-as.data.frame(doublecell_p4_s2$scDblFinder.class)
+colnames(x)<-"cell"
+head(x)
+p4_s2_filter<-p4_s2[,-c(which(x$cell=="doublet"))]
+dim(p4_s2)
+dim(p4_s2_filter)
+
+x<-as.data.frame(doublecell_p4_s3$scDblFinder.class)
+colnames(x)<-"cell"
+head(x)
+p4_s3_filter<-p4_s3[,-c(which(x$cell=="doublet"))]
+dim(p4_s3)
+dim(p4_s3_filter)
+
+x<-as.data.frame(doublecell_p4_s4$scDblFinder.class)
+colnames(x)<-"cell"
+head(x)
+p4_s4_filter<-p4_s4[,-c(which(x$cell=="doublet"))]
+dim(p4_s4)
+dim(p4_s4_filter)
+
+x<-as.data.frame(doublecell_p4_s5$scDblFinder.class)
+colnames(x)<-"cell"
+head(x)
+p4_s5_filter<-p4_s5[,-c(which(x$cell=="doublet"))]
+dim(p4_s5)
+dim(p4_s5_filter)
+
+x<-as.data.frame(doublecell_p4_s6$scDblFinder.class)
+colnames(x)<-"cell"
+head(x)
+p4_s6_filter<-p4_s6[,-c(which(x$cell=="doublet"))]
+dim(p4_s6)
+dim(p4_s6_filter)
+
+x<-as.data.frame(doublecell_p4_s7$scDblFinder.class)
+colnames(x)<-"cell"
+head(x)
+p4_s7_filter<-p4_s7[,-c(which(x$cell=="doublet"))]
+dim(p4_s7)
+dim(p4_s7_filter)
+
+
+###QC
+p4_s1<-p4_s1_filter
+p4_s2<-p4_s2_filter
+p4_s3<-p4_s3_filter
+p4_s4<-p4_s4_filter
+p4_s5<-p4_s5_filter
+p4_s6<-p4_s6_filter
+p4_s7<-p4_s7_filter
+
+##QC
+p4_s1bj <- CreateSeuratObject(counts = p4_s1, project = "CART_DYH_10X_S1", min.cells = 3,min.features = 200)
+p4_s1bj$condition <- "p4_s1"
+p4_s1bj[["percent.mt"]] <- PercentageFeatureSet(p4_s1bj, pattern = "^MT-")
+VlnPlot(object = p4_s1bj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+##
+p4_s1bj <- subset(p4_s1bj, subset = nFeature_RNA > 200 & nFeature_RNA < 30000 & percent.mt < 20 & nCount_RNA>2000 & nCount_RNA<30000)
+p4_s1bj <- NormalizeData(p4_s1bj, normalization.method = "LogNormalize", scale.factor = 10000)
+p4_s1bj <- FindVariableFeatures(p4_s1bj, selection.method = "vst", nfeatures = 2000)
+
+
+##QC
+p4_s2bj <- CreateSeuratObject(counts = p4_s2, project = "CART_DYH_10X_S2", min.cells = 3,min.features = 200)
+p4_s2bj$condition <- "p4_s2"
+p4_s2bj[["percent.mt"]] <- PercentageFeatureSet(p4_s2bj, pattern = "^MT-")
+VlnPlot(object = p4_s2bj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+##
+p4_s2bj <- subset(p4_s2bj, subset = nFeature_RNA > 200 & nFeature_RNA < 30000 & percent.mt < 20& nCount_RNA>2000 & nCount_RNA<30000)
+p4_s2bj <- NormalizeData(p4_s2bj, normalization.method = "LogNormalize", scale.factor = 10000)
+p4_s2bj <- FindVariableFeatures(p4_s2bj, selection.method = "vst", nfeatures = 2000)
+
+##QC
+p4_s3bj <- CreateSeuratObject(counts = p4_s3, project = "CART_DYH_10X_S3", min.cells = 3,min.features = 200)
+p4_s3bj$condition <- "p4_s3"
+p4_s3bj[["percent.mt"]] <- PercentageFeatureSet(p4_s3bj, pattern = "^MT-")
+VlnPlot(object = p4_s3bj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+##
+p4_s3bj <- subset(p4_s3bj, subset = nFeature_RNA > 200 & nFeature_RNA < 30000 & percent.mt < 20 & nCount_RNA>2000 & nCount_RNA<30000)
+p4_s3bj <- NormalizeData(p4_s3bj, normalization.method = "LogNormalize", scale.factor = 10000)
+p4_s3bj <- FindVariableFeatures(p4_s3bj, selection.method = "vst", nfeatures = 2000)
+
+
+##QC
+p4_s4bj <- CreateSeuratObject(counts = p4_s4, project = "CART_DYH_10X_S4", min.cells = 3,min.features = 200)
+p4_s4bj$condition <- "p4_s4"
+p4_s4bj[["percent.mt"]] <- PercentageFeatureSet(p4_s4bj, pattern = "^MT-")
+VlnPlot(object = p4_s4bj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+##
+p4_s4bj <- subset(p4_s4bj, subset = nFeature_RNA > 200 & nFeature_RNA < 30000 & percent.mt < 20 & nCount_RNA>2000 & nCount_RNA<30000)
+p4_s4bj <- NormalizeData(p4_s4bj, normalization.method = "LogNormalize", scale.factor = 10000)
+p4_s4bj <- FindVariableFeatures(p4_s4bj, selection.method = "vst", nfeatures = 2000)
+
+##QC
+p4_s5bj <- CreateSeuratObject(counts = p4_s5, project = "CART_DYH_10X_S5", min.cells = 3,min.features = 200)
+p4_s5bj$condition <- "p4_s5"
+p4_s5bj[["percent.mt"]] <- PercentageFeatureSet(p4_s5bj, pattern = "^MT-")
+VlnPlot(object = p4_s5bj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+##
+p4_s5bj <- subset(p4_s5bj, subset = nFeature_RNA > 200 & nFeature_RNA < 30000 & percent.mt < 20 & nCount_RNA>2000 & nCount_RNA<30000)
+p4_s5bj <- NormalizeData(p4_s5bj, normalization.method = "LogNormalize", scale.factor = 10000)
+p4_s5bj <- FindVariableFeatures(p4_s5bj, selection.method = "vst", nfeatures = 2000)
+
+##QC
+p4_s6bj <- CreateSeuratObject(counts = p4_s6, project = "CART_DYH_10X_S6", min.cells = 3,min.features = 200)
+p4_s6bj$condition <- "p4_s6"
+p4_s6bj[["percent.mt"]] <- PercentageFeatureSet(p4_s6bj, pattern = "^MT-")
+VlnPlot(object = p4_s6bj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+##
+p4_s6bj <- subset(p4_s6bj, subset = nFeature_RNA > 200 & nFeature_RNA < 30000 & percent.mt < 20 & nCount_RNA>2000 & nCount_RNA<30000)
+p4_s6bj <- NormalizeData(p4_s6bj, normalization.method = "LogNormalize", scale.factor = 10000)
+p4_s6bj <- FindVariableFeatures(p4_s6bj, selection.method = "vst", nfeatures = 2000)
+
+##QC
+p4_s7bj <- CreateSeuratObject(counts = p4_s7, project = "CART_DYH_10X_S7", min.cells = 3,min.features = 200)
+p4_s7bj$condition <- "p4_s7"
+p4_s7bj[["percent.mt"]] <- PercentageFeatureSet(p4_s7bj, pattern = "^MT-")
+VlnPlot(object = p4_s7bj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+##
+p4_s7bj <- subset(p4_s7bj, subset = nFeature_RNA > 200 & nFeature_RNA < 30000 & percent.mt < 20 & nCount_RNA>2000 & nCount_RNA<30000)
+p4_s7bj <- NormalizeData(p4_s7bj, normalization.method = "LogNormalize", scale.factor = 10000)
+p4_s7bj <- FindVariableFeatures(p4_s7bj, selection.method = "vst", nfeatures = 2000)
