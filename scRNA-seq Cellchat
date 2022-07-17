@@ -1,57 +1,900 @@
-## 
-### ---------------
-### Date: 2020-2-27 
-### Step8:cellchat analysis of BM 
-### ---------------
+pkgs <- c("fs", "futile.logger", "configr", "stringr", "ggpubr", "ggthemes","CellChat", "ggplot2", "reshape2",
+          "Seurat", "jhtools", "glue", "openxlsx", "ggsci", "patchwork", "cowplot", "tidyverse", "dplyr")
+for (pkg in pkgs){
+  suppressPackageStartupMessages(library(pkg, character.only = T))
+}
+project <- "cell_communication_0712"
+dataset <- "CellChat_data/pbmcdg_20210607/cellchat_pbmc_all"
+workdir <- glue::glue("~/projects/{project}/{dataset}")
+setwd(workdir)
+
+#read in rds data
+pbmcdg <- readr::read_rds("../pbmcdg_20210607.rds")
+
+#count file
+pbmcdg_20210607_df <- as.data.frame(as_matrix(pbmcdg_20210607@assays$RNA@counts))
+pbmcdg_20210607_df$gene <- row.names(pbmcdg_20210607_df)
+pbmcdg_20210607_df <- pbmcdg_20210607_df %>% select(gene,starts_with("s"))
+write_delim(pbmcdg_20210607_df, "pbmcdg_count.txt",col_names = T, delim = "\t")
+
+#meta file
+meta_data <- bind_cols(rownames(pbmcdg_20210607@meta.data),pbmcdg_20210607@meta.data[,'cluster_last',drop=F]) %>%
+  dplyr::mutate(cluster_last = replace_na(cluster_last, "Unkown"))
+colnames(meta_data) <- c("ID","cell_type")
+write_delim(meta_data, 'pbmcdg_meta.txt', delim = "\t")
+
+#run statistical_analysis in shell cmd
+cmd1 <- "/mnt/data2/home/jhuang/.conda/envs/cpdb/bin/cellphonedb method statistical_analysis pbmcdg_meta.txt pbmcdg_count.txt --counts-data=gene_name --output-path ./pbmcdg2_out"
+#plot dot plot
+cmd2 <- "/mnt/data2/home/jhuang/.conda/envs/cpdb/bin/cellphonedb plot dot_plot --means-path ./pbmcdg2_out/means.txt --pvalues-path ./pbmcdg2_out/pvalues.txt --output-path ./pbmcdg2_out"
+#plot heatmap
+cmd3 <- "/mnt/data2/home/jhuang/.conda/envs/cpdb/bin/cellphonedb plot heatmap_plot pbmcdg_meta.txt --pvalues-path ./pbmcdg2_out/pvalues.txt --output-path ./pbmcdg2_out"
+
+cmds <- c(cmd1,cmd2,cmd3)
+jhtools::run_cmds(cmds)
+
+#merge mean file and pvalue file together to one file
+mean <- read_delim("means.txt",delim="\t")
+pvalue <- read_delim("pvalues.txt",delim="\t")
+mean<- mean[,c(2,7,12:60)]
+pvalue<- pvalue[,c(2,7,12:60)]
+m<-melt(mean,id = c("interacting_pair","secreted"))
+p<-melt(pvalue,id = c("interacting_pair","secreted"))
+colnames(m)<-c("interacting_pair","secreted","interacting_cells","mean_expression")
+m$pvalue <- p$value
+write_csv(m,file = "pbmc_all_LRp_cellphone.csv")
+
+#select figure pathways from total LR pairs and check
+figure_pathway_list <- str_subset(m$interacting_pair, pattern = "TNF|IFN|CD40|IL1[^0-9]|IL6[^0-9]|FGF|GAS|FLT3|CCL|CSF|GRN", negate = F) %>% unique()
+figure_pathway_list_cellphone <- m %>% dplyr::filter(interacting_pair %in% figure_pathway_list)
+figure_pathway_list_cellphone_p005 <- figure_pathway_list_cellphone %>% dplyr::filter(pvalue <= 0.05) %>% .$interacting_pair %>% unique()
+
+S_CART <- figure_pathway_list_cellphone %>% dplyr::filter(interacting_pair %in% figure_pathway_list_cellphone_p005) %>%
+  dplyr::filter(interacting_cells %in% str_subset(figure_pathway_list_cellphone$interacting_cells, pattern = "CART"))
+
+S_CART$logp<- -log10(S_CART$pvalue)
+S_CART[S_CART$logp>2,]$logp <- 2
+S_CART$interacting_cells <- factor(S_CART$interacting_cells,levels = c("CART|CART","CART|EndoT","CART|NK",
+                                                                       "CART|Plasma/Tumor","CART|Monocytes",
+                                                                       "CART|DC","CART|Platelet","EndoT|CART",
+                                                                       "NK|CART","Plasma/Tumor|CART","Monocytes|CART",
+                                                                       "DC|CART","Platelet|CART"))
+S_CART$logmean<-log2(S_CART$mean_expression)
+
+S_CART[S_CART$logmean< (-4),]$logmean <- (-4)
+LR_list <- read.table("figure_pathway_list_cellphone_CART_p005_LRlist.txt",header = F,sep = "\t")
+S_CART$interacting_pair <- factor(S_CART$interacting_pair,levels = rev(LR_list$V1))
+
+#Fig3E
+p <- ggplot(S_CART, aes(interacting_cells, interacting_pair)) +
+  geom_point(aes(color=logmean, size=logp)) +
+  scale_colour_gradient2(low = "blue",mid="gold", high = "red",breaks=c(-4,0,4))+
+  theme_set(theme_bw())+theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))+
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,5))
+ggsave("figure_pathway_list_cellphone_CART_p005.pdf", p, width = 5)
 
 
-younghsc<- createCellChat(object = younghsc, meta=young_meta)
-oldhsc<-createCellChat(object = oldhsc, meta=old_meta)
+Mono <- figure_pathway_list_cellphone %>% dplyr::filter(interacting_pair %in% figure_pathway_list_cellphone_p005) %>%
+  dplyr::filter(interacting_cells %in% str_subset(figure_pathway_list_cellphone$interacting_cells, pattern = "Monocytes"))
 
-CellChatDB <- CellChatDB.mouse # use CellChatDB.mouse if running on mouse data
-showDatabaseCategory(CellChatDB)
+Mono$logp<- -log10(Mono$pvalue)
+Mono[Mono$logp>2,]$logp <- 2
+Mono$interacting_cells <- factor(Mono$interacting_cells,levels = c("Monocytes|Monocytes","Monocytes|CART",
+                                                                   "Monocytes|EndoT","Monocytes|NK","Monocytes|Plasma/Tumor",
+                                                                   "Monocytes|DC","Monocytes|Platelet","CART|Monocytes","EndoT|Monocytes",
+                                                                   "NK|Monocytes","Plasma/Tumor|Monocytes","DC|Monocytes",
+                                                                   "Platelet|Monocytes"))
+Mono$logmean<-log2(Mono$mean_expression)
 
-CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling") # use Secreted Signaling
-CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+Mono[Mono$logmean< (-4),]$logmean <- (-4)
+LR_list <- read.table("figure_pathway_list_cellphone_Monocytes_p005_list.txt",header = F,sep = "\t")
+Mono$interacting_pair <- factor(Mono$interacting_pair,levels = rev(LR_list$V1))
+#Fig3F
+p <- ggplot(Mono, aes(interacting_cells, interacting_pair)) +
+  geom_point(aes(color=logmean, size=logp)) +
+  scale_colour_gradient2(low = "blue",mid="gold", high = "red",breaks=c(-4,0,4))+
+  theme_set(theme_bw())+theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 30, hjust = 0.5, vjust = 0.5))+
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,5))
+ggsave("figure_pathway_list_cellphone_Mono_p005.pdf", p, width = 5)
+
+######cellchat
+#read in rds data
+cellchatdg <- readr::read_rds("pbmcdg_cellchatdg.RDS")
+CRSb <- readr::read_rds("s2s5_cellchat.RDS")
+CRSp <- readr::read_rds("s3s6_cellchat.RDS")
+CRSr <- readr::read_rds("s4s7_cellchat.RDS")
+
+#Fig3B
+#creat cellchat object
+table(pbmcdg_20210607@meta.data$cluster_last)
+cellchat <- createCellChat(object=pbmcdg_20210607,group.by="cluster_last")
+groupSize <- as.numeric(table(cellchat@idents))
+levels(cellchat@idents)
+#code from document of CellChat
+CellChatDB <- CellChatDB.human
+CellChatDB.use <- CellChatDB
+cellchat@DB <- CellChatDB.use
+cellchat<-subsetData(cellchat)
+future::plan("multiprocess", workers = 4)
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+cellchat <- projectData(cellchat, PPI.human)
+options(future.globals.maxSize=734003200)
+cellchat <- computeCommunProb(cellchat)
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+groupSize <- as.numeric(table(cellchat@idents))
+
+#Fig3B
+pdf(file="pbmcdg_20210607_network.pdf")
+netVisual_circle(cellchat@net$count, vertex.weight = groupSize, weight.scale = T,
+                 label.edge= T, title.name = "Number of interactions in pbmc",
+                 arrow.size = 0.5, color.use =c("#3778AD","#E57FB0","#4EA74A",
+                                                "#E89116","#8F4C9A","#D6251F","#B79AC6"))
+dev.off()
+
+#FigS3A
+mat <- cellchat@net$weight
+pdf(file="pbmcdg_20210607_networkShell.pdf", height = 10, width = 12)
+par(mfrow = c(2,4), xpd=TRUE)
+for (i in 1:nrow(mat)) {
+  mat2 <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+  mat2[i, ] <- mat[i, ]
+  netVisual_circle(mat2, vertex.weight = groupSize, weight.scale = T, label.edge= T,
+                   edge.weight.max = max(mat), title.name = rownames(mat)[i],
+                   arrow.size = 0.5, arrow.width = 3, alpha.edge= 100,
+                   color.use =c("#3778AD","#E57FB0","#4EA74A","#E89116","#8F4C9A","#D6251F","#B79AC6"))}
+dev.off()
+
+time_dg <- list("PBMC FCb", c("PBMC CRSb","CART products"), c("CART at CRSp","Non-CART at CRSp"), c("CART at CRSr","Non-CART at CRSr"))
+time_point <- c("FCb","CRSb","CRSp","CRSr")
+names(time_dg) <- time_point
+
+for (i in time_point){
+  for (j in 1:length(time_dg[[i]])){
+    t <- time_dg[[i]][j]
+    pbmcdg_20210607@meta.data[pbmcdg_20210607@meta.data$timedg == t,]$time <- i
+  }
+}
+
+Idents(pbmcdg_20210607) <- "cluster_last"
+pbmcdg_20210607 <- subset(x = pbmcdg_20210607,idents=c("CART","EndoT","Monocytes","NK","Plasma/Tumor","Platelet"))
+
+Idents(pbmcdg_20210607) <- "time"
+#table(pbmcdg_20210607@active.ident)
+pbmcdg_20210607_1 <- subset(x = pbmcdg_20210607,idents=c("CRSb","CRSp","CRSr"))
+
+list_t<-c("CRSb","CRSp","CRSr")
+
+for (i in 1:length(list_t)){
+  sub1 <- paste("pbmcdg_20210607", list_t[i], sep="_")
+  sub2 <- paste("pbmcdg_20210607_other", list_t[i], sep="_")
+  assign(sub1,subset(x = pbmcdg_20210607_1,idents=list_t[i]))
+  assign(sub2,subset(x = pbmcdg_20210607_1,idents=list_t[-i]))
+}
+
+pbmcdg_20210607_other_CRSb$time <- "other"
+pbmcdg_20210607_other_CRSp$time <- "other"
+pbmcdg_20210607_other_CRSr$time <- "other"
+
+for (i in 1:length(list_t)){
+  sub1 <- paste("pbmcdg_20210607", list_t[i], sep="_")
+  sub2 <- paste("pbmcdg_20210607_other", list_t[i], sep="_")
+  subchat1 <- paste("cellchat", list_t[i], sep="_")
+  subchat2 <- paste("cellchat_other", list_t[i], sep="_")
+  assign(subchat1,createCellChat(object= get(sub1),group.by="cluster_last"))
+  assign(subchat2,createCellChat(object= get(sub2),group.by="cluster_last"))
+}
+
+list_chat <- c(cellchat_CRSb,cellchat_CRSp,cellchat_CRSr,cellchat_other_CRSb,cellchat_other_CRSp,cellchat_other_CRSr)
+names(list_chat) <- c("cellchat_CRSb","cellchat_CRSp","cellchat_CRSr","cellchat_other_CRSb","cellchat_other_CRSp","cellchat_other_CRSr")
+
+CellChatDB <- CellChatDB.human
+CellChatDB.use <- CellChatDB
+future::plan("multiprocess", workers = 6)
+
+for (i in 1:length(list_chat)){
+  list_chat[[i]]@DB <- CellChatDB.use
+  list_chat[[i]] <- subsetData(list_chat[[i]])
+  list_chat[[i]] <- identifyOverExpressedGenes(list_chat[[i]])
+  list_chat[[i]] <- identifyOverExpressedInteractions(list_chat[[i]])
+  list_chat[[i]] <- projectData(list_chat[[i]], PPI.human)
+  list_chat[[i]] <- computeCommunProb(list_chat[[i]])
+  list_chat[[i]] <- computeCommunProbPathway(list_chat[[i]])
+  list_chat[[i]] <- aggregateNet(list_chat[[i]])
+}
+
+#save rds
+saveRDS(list_chat,file="list_chat.rds")
+
+#Fig3C CRSp VS. CRSb
+object.list <- list(CRSb = list_chat$cellchat_CRSb, CRSp = list_chat$cellchat_CRSp)
+cellchat <- mergeCellChat(object.list, add.names = names(object.list))
+
+pdf(file = "netVisual_diffInteraction_CRSpb.pdf")
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_diffInteraction(cellchat, weight.scale = T)
+netVisual_diffInteraction(cellchat, weight.scale = T, measure = "weight")
+dev.off()
+
+#Fig3D CRSr VS. CRSp
+object.list <- list(CRSp = list_chat$cellchat_CRSp, CRSr = list_chat$cellchat_CRSr)
+cellchat <- mergeCellChat(object.list, add.names = names(object.list))
+
+pdf(file = "netVisual_diffInteraction_CRSrp.pdf")
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_diffInteraction(cellchat, weight.scale = T)
+netVisual_diffInteraction(cellchat, weight.scale = T, measure = "weight")
+dev.off()
+
+#FigS3A
+mat <- cellchat@net$weight
+pdf(file="pbmcdg_20210607_networkShell_3.pdf",height=10,width=12)
+par(mfrow = c(2,4), xpd=TRUE)
+  for (i in 1:nrow(mat)) {
+    mat2 <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+    mat2[i, ] <- mat[i, ]
+    netVisual_circle(mat2, vertex.weight = groupSize, weight.scale = T, label.edge= F,
+                     edge.weight.max = max(mat), title.name = rownames(mat)[i],
+                     arrow.size = 0.5,arrow.width =3,alpha.edge=100,
+                     color.use =c("#3778AD","#E57FB0","#4EA74A","#E89116","#8F4C9A","#D6251F","#B79AC6"))}
+dev.off()
 
 
-# subset the expression data of signaling genes for saving computation cost
-younghsc@DB <- CellChatDB
-oldhsc@DB <- CellChatDB
-younghsc <- subsetData(younghsc ) # This step is necessary even if using the whole database
-oldhsc <- subsetData(oldhsc)
+#FigS3B-I
+#based on RDS data from lx
+###data prepare
+list_CRS <- c(CRSb,CRSp,CRSr)
+names(list_CRS) <- c("CRSb","CRSp","CRSr")
 
-future::plan("multiprocess", workers = 4) # do parallel
-#> Warning: [ONE-TIME WARNING] Forked processing ('multicore') is disabled
-#> in future (>= 1.13.0) when running R from RStudio, because it is
-#> considered unstable. Because of this, plan("multicore") will fall
-#> back to plan("sequential"), and plan("multiprocess") will fall back to
-#> plan("multisession") - not plan("multicore") as in the past. For more details,
-#> how to control forked processing or not, and how to silence this warning in
-#> future R sessions, see ?future::supportsMulticore
-oldhsc <- identifyOverExpressedGenes(oldhsc)
-oldhsc <- identifyOverExpressedInteractions(oldhsc)
-younghsc <- identifyOverExpressedGenes(younghsc)
-younghsc <- identifyOverExpressedInteractions(younghsc)
-# project gene expression data onto PPI network (optional)
-oldhsc<- projectData(oldhsc, PPI.mouse)
-younghsc <- projectData(younghsc, PPI.mouse)
+#transfrom interaction from cellchat object to dataframe
+list_CRS_pval <- list_CRS %>% map(~data.frame(matrix(.x@net$pval, nrow=dim(.x@net$pval)[3],
+                                                     byrow=TRUE),row.names=dimnames(.x@net$pval)[[3]]))
 
-############### 
-oldhsc <- computeCommunProb(oldhsc)
-younghsc <- computeCommunProb(younghsc)
-# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
-oldhsc <- filterCommunication(oldhsc, min.cells = 10)
-younghsc <- filterCommunication(younghsc, min.cells = 10)
+inter_cell <-c("Plasma/Tumor","CART","EndoT","NK","Monocytes","DC","Platelet")
+inter_cell <- inter_cell %>% map(~str_c(inter_cell,.x,sep = "_")) %>% unlist()
+inter_cell_nDC <- c("Plasma/Tumor","CART","EndoT","NK","Monocytes","Platelet")
+inter_cell_nDC <- inter_cell_nDC %>% map(~str_c(inter_cell_nDC,.x,sep = "_")) %>% unlist()
 
-oldhsc <- computeCommunProbPathway(oldhsc)
-younghsc <- computeCommunProbPathway(younghsc)
+#DC only exist in CRSr, so filter DC from all CRS stages.
+colnames(list_CRS_pval$CRSr) <- inter_cell
+list_CRS_pval$CRSr <- list_CRS_pval$CRSr %>% dplyr::select(!contains("DC"))
+list_CRS_pval <- list_CRS_pval %>% map(~stats::setNames(.x,inter_cell_nDC))
 
-oldhsc <- aggregateNet(oldhsc)
-younghsc <- aggregateNet(younghsc)
+#transfrom interaction from cellchat object to dataframe
+list_CRS_prob <-list_CRS %>% map(~data.frame(matrix(.x@net$prob, nrow=dim(.x@net$prob)[3],
+                                                    byrow=TRUE),row.names=dimnames(.x@net$prob)[[3]]))
+colnames(list_CRS_prob$CRSr) <- inter_cell
+list_CRS_prob$CRSr <- list_CRS_prob$CRSr %>% dplyr::select(!contains("DC"))
+list_CRS_prob <- list_CRS_prob %>% map(~stats::setNames(.x,inter_cell_nDC))
 
-groupSize <- as.numeric(table(younghsc@idents)) # number of cells in each cell group
+#pivot_longer
+list_CRS_pval <- list_CRS_pval %>% map(~tibble::rownames_to_column(.x,var = "interacting_pairs")) %>%
+  map(~pivot_longer(.x,cols = -interacting_pairs, names_to = "interacting_cells",values_to = "pval"))
 
-saveRDS(younghsc,"younghsc.rds")
-saveRDS(oldhsc,"oldhsc.rds")
+list_CRS_prob <- list_CRS_prob %>% map(~tibble::rownames_to_column(.x,var = "interacting_pairs")) %>%
+  map(~pivot_longer(.x,cols = -interacting_pairs, names_to = "interacting_cells",values_to = "prob"))
 
+#add unique ID for join
+list_CRS_pval <- list_CRS_pval %>% map(~dplyr::mutate(.x,interacting = str_c(interacting_pairs,interacting_cells,sep = "_")))
+list_CRS_prob <- list_CRS_prob %>% map(~dplyr::mutate(.x,interacting = str_c(interacting_pairs,interacting_cells,sep = "_")))
+
+#join
+CRS_pval <- full_join(list_CRS_pval$CRSb,list_CRS_pval$CRSp,by="interacting") %>% full_join(list_CRS_pval$CRSr,by="interacting")
+CRS_prob <- full_join(list_CRS_prob$CRSb,list_CRS_prob$CRSp,by="interacting") %>% full_join(list_CRS_prob$CRSr,by="interacting")
+
+#pathway in lx figures
+pathways <- c("TNF","IFN","CD40[^0-9]","IL[1,2,6][^0-9]","FGF",
+              "GAS","FLT3[^0-9]","CCL","CSF","GRN","BAFF")
+
+#filter interactions
+CRS_pval_pathway <- pathways %>% map(~str_detect(CRS_pval$interacting, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_pval,.x)) %>% bind_rows() %>% distinct() %>%
+  dplyr::select(interacting,interacting_pairs,interacting_cells,starts_with("pval"))
+
+CRS_prob_pathway <- pathways %>% map(~str_detect(CRS_prob$interacting, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob,.x)) %>% bind_rows() %>% distinct() %>%
+  dplyr::select(interacting,interacting_pairs,interacting_cells,starts_with("prob"))
+
+colnames(CRS_pval_pathway) <- c("interacting","interacting_pairs","interacting_cells","pval_CRSb","pval_CRSp","pval_CRSr")
+colnames(CRS_prob_pathway) <- c("interacting","interacting_pairs","interacting_cells","prob_CRSb","prob_CRSp","prob_CRSr")
+
+#filter pvalue <= 0.05 in any stages
+CRS_pval_pathway <- CRS_pval_pathway %>% dplyr::filter(pval_CRSb <= 0.05 | pval_CRSp <= 0.05 | pval_CRSr <= 0.05)
+CRS_prob_pathway <- CRS_prob_pathway %>% dplyr::filter(interacting %in% CRS_pval_pathway$interacting)
+
+###CART cells for FigS3B-C
+#extract CART-cells' interactions
+CRS_pval_pathway_CART <- CRS_pval_pathway %>% dplyr::filter(str_detect(interacting_cells, "CART"))
+CRS_prob_pathway_CART <- CRS_prob_pathway %>% dplyr::filter(str_detect(interacting_cells, "CART"))
+
+#pivot_longer
+CRS_pval_pathway_CART <- CRS_pval_pathway_CART %>% pivot_longer(c(`pval_CRSb`,`pval_CRSp`,`pval_CRSr`),names_to = "CRS",values_to = "pval")
+CRS_prob_pathway_CART <- CRS_prob_pathway_CART %>% pivot_longer(c(`prob_CRSb`,`prob_CRSp`,`prob_CRSr`),names_to = "CRS",values_to = "prob")
+
+#merge prob and pval to one df
+CRS_prob_pathway_CART$pval <- CRS_pval_pathway_CART$pval
+
+#add stages information to interacting_cells
+CRS_prob_pathway_CART <- CRS_prob_pathway_CART %>% dplyr::mutate(CRS = str_replace(CRS,"prob_","")) %>%
+  dplyr::mutate(interacting_cells=str_c(interacting_cells,CRS,sep = "_")) %>% dplyr::select(-CRS)
+
+range(CRS_prob_pathway_CART[!is.na(CRS_prob_pathway_CART$prob),]$prob)#0.00000000 0.01716883
+CRS_prob_pathway_CART$logp <- -log10(CRS_prob_pathway_CART$pval)
+CRS_prob_pathway_CART[CRS_prob_pathway_CART$logp > 2 & !is.na(CRS_prob_pathway_CART$logp),]$logp <- 2
+
+#CART as sender or reciever
+CRS_prob_pathway_CART_sender <- CRS_prob_pathway_CART %>% dplyr::filter(str_detect(interacting_cells, "^CART_"))
+CRS_prob_pathway_CART_receiver <- CRS_prob_pathway_CART %>% dplyr::filter(str_detect(interacting_cells, "_CART_"))
+
+#sender
+CRS_prob_pathway_CART_sender$interacting_cells <- factor(CRS_prob_pathway_CART_sender$interacting_cells,
+                                                         levels = c("CART_CART_CRSb","CART_CART_CRSp","CART_CART_CRSr",
+                                                                    "CART_EndoT_CRSb","CART_EndoT_CRSp","CART_EndoT_CRSr",
+                                                                    "CART_NK_CRSb","CART_NK_CRSp","CART_NK_CRSr",
+                                                                    "CART_Plasma/Tumor_CRSb", "CART_Plasma/Tumor_CRSp",
+                                                                    "CART_Plasma/Tumor_CRSr","CART_Monocytes_CRSb",
+                                                                    "CART_Monocytes_CRSp","CART_Monocytes_CRSr",
+                                                                    "CART_Platelet_CRSb","CART_Platelet_CRSp","CART_Platelet_CRSr"))
+#receiver
+CRS_prob_pathway_CART_receiver$interacting_cells <- factor(CRS_prob_pathway_CART_receiver$interacting_cells,
+                                                           levels = c("CART_CART_CRSb","CART_CART_CRSp","CART_CART_CRSr",
+                                                                      "EndoT_CART_CRSb","EndoT_CART_CRSp","EndoT_CART_CRSr",
+                                                                      "NK_CART_CRSb","NK_CART_CRSp","NK_CART_CRSr",
+                                                                      "Plasma/Tumor_CART_CRSb", "Plasma/Tumor_CART_CRSp",
+                                                                      "Plasma/Tumor_CART_CRSr","Monocytes_CART_CRSb",
+                                                                      "Monocytes_CART_CRSp","Monocytes_CART_CRSr",
+                                                                      "Platelet_CART_CRSb","Platelet_CART_CRSp","Platelet_CART_CRSr"))
+
+CRS_prob_pathway_CART_sender$probT <- -1/log(CRS_prob_pathway_CART_sender$prob)
+CRS_prob_pathway_CART_receiver$probT <- -1/log(CRS_prob_pathway_CART_receiver$prob)
+
+#FigS3B
+CRS_prob_pathway_CART_sender_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                               unique(CRS_prob_pathway_CART_sender$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_CART_sender_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_CART_sender <- CRS_prob_pathway_CART_sender %>% left_join(CRS_prob_pathway_CART_sender_df,by = "interacting_pairs")
+pathways <- c("TNF","IFN","CD40","^IL[1,2,6]","FGF","GAS","FLT","CCL","CSF","GRN","BAFF")
+
+CRS_prob_pathway_CART_sender_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_CART_sender$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_CART_sender,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_CART_sender_filter$interacting_name <- factor(CRS_prob_pathway_CART_sender_filter$interacting_name,
+                                                               levels = rev(c("TNF - TNFRSF1A","TNF - TNFRSF1B","CCL5 - CCR5",
+                                                                              "CCL3 - CCR5","CCL5 - CCR3","CCL5 - CCR1",
+                                                                              "CCL3 - CCR1","CCL4 - CCR5","IL6 - (IL6R+IL6ST)",
+                                                                              "IL7 - (IL7R+IL2RG)","IL2 - (IL2RB+IL2RG)","IL4 - (IL4R+IL2RG)",
+                                                                              "IL15 - (IL15RA+IL2RB)", "IL21 - (IL21R+IL2RG)",
+                                                                              "IL1B - IL1R2","IL1B - (IL1R1+IL1RAP)",
+                                                                              "CD40LG - (ITGA5+ITGB1)","CD40LG - (ITGAM+ITGB2)",
+                                                                              "CD40LG - (ITGA2B+ITGB3)","TNFSF13B - TNFRSF13B",
+                                                                              "TNFSF13B - TNFRSF13C","GAS6 - AXL","FLT3L - FLT3",
+                                                                              "CSF1 - CSF1R","FGF2 - FGFR1","FGF2 - FGFR2",
+                                                                              "GRN - SORT1","IFNG - (IFNGR1+IFNGR2)")))
+
+p <- ggplot(CRS_prob_pathway_CART_sender_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_CART_sender_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_CART_sender_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_CART_sender_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_CART_sender_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_CART_sender_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+##FigS3C
+CRS_prob_pathway_CART_receiver_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                                 unique(CRS_prob_pathway_CART_receiver$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_CART_receiver_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_CART_receiver <- CRS_prob_pathway_CART_receiver %>% left_join(CRS_prob_pathway_CART_receiver_df,by = "interacting_pairs")
+
+
+CRS_prob_pathway_CART_receiver_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_CART_receiver$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_CART_receiver,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_CART_receiver_filter$interacting_name <- factor(CRS_prob_pathway_CART_receiver_filter$interacting_name,
+                                                                 levels = rev(c("TNF - TNFRSF1A","TNF - TNFRSF1B","CCL5 - CCR3",
+                                                                                "CCL5 - CCR1","CCL5 - CCR5","CCL3 - CCR1",
+                                                                                "CCL3 - CCR5","CCL4 - CCR5","CCL3L1 - CCR1","IL6 - (IL6R+IL6ST)",
+                                                                                "IL7 - (IL7R+IL2RG)","IL2 - (IL2RB+IL2RG)","IL4 - (IL4R+IL2RG)",
+                                                                                "IL15 - (IL15RA+IL2RB)","IL21 - (IL21R+IL2RG)",
+                                                                                "IL1B - IL1R2","IL1B - (IL1R1+IL1RAP)","CD40LG - (ITGAM+ITGB2)",
+                                                                                "CD40LG - (ITGA5+ITGB1)","TNFSF13B - TNFRSF13C",
+                                                                                "TNFSF13B - TNFRSF13B","GAS6 - AXL","FLT3L - FLT3",
+                                                                                "CSF1 - CSF1R","FGF2 - FGFR1",
+                                                                                "FGF2 - FGFR2","GRN - SORT1")))
+
+p <- ggplot(CRS_prob_pathway_CART_receiver_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_CART_receiver_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_CART_receiver_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_CART_receiver_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_CART_receiver_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_CART_receiver_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+###Monocytes cells
+#extract Monocytes-cells' interactions
+CRS_pval_pathway_Monocytes <- CRS_pval_pathway %>% dplyr::filter(str_detect(interacting_cells, "Monocytes"))
+CRS_prob_pathway_Monocytes <- CRS_prob_pathway %>% dplyr::filter(str_detect(interacting_cells, "Monocytes"))
+
+#pivot_longer
+CRS_pval_pathway_Monocytes <- CRS_pval_pathway_Monocytes %>% pivot_longer(c(`pval_CRSb`,`pval_CRSp`,`pval_CRSr`),names_to = "CRS",values_to = "pval")
+CRS_prob_pathway_Monocytes <- CRS_prob_pathway_Monocytes %>% pivot_longer(c(`prob_CRSb`,`prob_CRSp`,`prob_CRSr`),names_to = "CRS",values_to = "prob")
+
+#merge prob and pval to one df
+CRS_prob_pathway_Monocytes$pval <- CRS_pval_pathway_Monocytes$pval
+
+#add stages information to interacting_cells
+CRS_prob_pathway_Monocytes <- CRS_prob_pathway_Monocytes %>% dplyr::mutate(CRS = str_replace(CRS,"prob_","")) %>%
+  dplyr::mutate(interacting_cells=str_c(interacting_cells,CRS,sep = "_")) %>% dplyr::select(-CRS)
+
+range(CRS_prob_pathway_Monocytes[!is.na(CRS_prob_pathway_Monocytes$prob),]$prob)#0.00000000 0.0005284013
+CRS_prob_pathway_Monocytes$logp <- -log10(CRS_prob_pathway_Monocytes$pval)
+CRS_prob_pathway_Monocytes[CRS_prob_pathway_Monocytes$logp > 2 & !is.na(CRS_prob_pathway_Monocytes$logp),]$logp <- 2
+
+#Monocytes as sender or reciever
+CRS_prob_pathway_Monocytes_sender <- CRS_prob_pathway_Monocytes %>% dplyr::filter(str_detect(interacting_cells, "^Monocytes_"))
+CRS_prob_pathway_Monocytes_receiver <- CRS_prob_pathway_Monocytes %>% dplyr::filter(str_detect(interacting_cells, "_Monocytes_"))
+
+#sender
+CRS_prob_pathway_Monocytes_sender$interacting_cells <- factor(CRS_prob_pathway_Monocytes_sender$interacting_cells,
+                                                              levels = c("Monocytes_Monocytes_CRSb","Monocytes_Monocytes_CRSp","Monocytes_Monocytes_CRSr",
+                                                                         "Monocytes_CART_CRSb","Monocytes_CART_CRSp","Monocytes_CART_CRSr",
+                                                                         "Monocytes_EndoT_CRSb","Monocytes_EndoT_CRSp","Monocytes_EndoT_CRSr",
+                                                                         "Monocytes_NK_CRSb", "Monocytes_NK_CRSp", "Monocytes_NK_CRSr",
+                                                                         "Monocytes_Plasma/Tumor_CRSb", "Monocytes_Plasma/Tumor_CRSp",
+                                                                         "Monocytes_Plasma/Tumor_CRSr", "Monocytes_Platelet_CRSb",
+                                                                         "Monocytes_Platelet_CRSp","Monocytes_Platelet_CRSr"))
+#receiver
+CRS_prob_pathway_Monocytes_receiver$interacting_cells <- factor(CRS_prob_pathway_Monocytes_receiver$interacting_cells,
+                                                                levels = c("Monocytes_Monocytes_CRSb","Monocytes_Monocytes_CRSp","Monocytes_Monocytes_CRSr",
+                                                                           "CART_Monocytes_CRSb","CART_Monocytes_CRSp","CART_Monocytes_CRSr",
+                                                                           "EndoT_Monocytes_CRSb","EndoT_Monocytes_CRSp","EndoT_Monocytes_CRSr",
+                                                                           "NK_Monocytes_CRSb", "NK_Monocytes_CRSp", "NK_Monocytes_CRSr",
+                                                                           "Plasma/Tumor_Monocytes_CRSb","Plasma/Tumor_Monocytes_CRSp",
+                                                                           "Plasma/Tumor_Monocytes_CRSr","Platelet_Monocytes_CRSb",
+                                                                           "Platelet_Monocytes_CRSp","Platelet_Monocytes_CRSr"))
+
+CRS_prob_pathway_Monocytes_sender$probT <- -1/log(CRS_prob_pathway_Monocytes_sender$prob)
+CRS_prob_pathway_Monocytes_receiver$probT <- -1/log(CRS_prob_pathway_Monocytes_receiver$prob)
+
+CRS_prob_pathway_Monocytes_sender_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                                    unique(CRS_prob_pathway_Monocytes_sender$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_Monocytes_sender_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_Monocytes_sender <- CRS_prob_pathway_Monocytes_sender %>% left_join(CRS_prob_pathway_Monocytes_sender_df,by = "interacting_pairs")
+
+pathways <- c("TNF","IFN","CD40","^IL[1,2,6]","FGF","GAS","FLT","CCL","CSF","GRN","BAFF")
+
+CRS_prob_pathway_Monocytes_sender_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_Monocytes_sender$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_Monocytes_sender,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_Monocytes_sender_filter$interacting_name <- factor(CRS_prob_pathway_Monocytes_sender_filter$interacting_name,
+                                                                    levels = rev(c("TNF - TNFRSF1A", "TNF - TNFRSF1B", "CCL3 - CCR5","CCL3 - CCR1",
+                                                                                   "CCL3L1 - CCR1","CCL4 - CCR5","IL6 - (IL6R+IL6ST)", "IL1B - (IL1R1+IL1RAP)",
+                                                                                   "IL1B - IL1R2", "CD40LG - (ITGAM+ITGB2)", "CD40LG - (ITGA5+ITGB1)",
+                                                                                   "CD40LG - (ITGA2B+ITGB3)", "TNFSF13B - TNFRSF13B","TNFSF13B - TNFRSF13C",
+                                                                                   "GAS6 - AXL", "CSF1 - CSF1R", "FGF2 - FGFR1","FGF2 - FGFR2",
+                                                                                   "GRN - SORT1", "IFNG - (IFNGR1+IFNGR2)")))
+
+p <- ggplot(CRS_prob_pathway_Monocytes_sender_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_Monocytes_sender_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_Monocytes_sender_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_Monocytes_sender_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_Monocytes_sender_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_Monocytes_sender_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+CRS_prob_pathway_Monocytes_receiver_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                                      unique(CRS_prob_pathway_Monocytes_receiver$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_Monocytes_receiver_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_Monocytes_receiver <- CRS_prob_pathway_Monocytes_receiver %>% left_join(CRS_prob_pathway_Monocytes_receiver_df,by = "interacting_pairs")
+
+
+CRS_prob_pathway_Monocytes_receiver_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_Monocytes_receiver$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_Monocytes_receiver,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_Monocytes_receiver_filter$interacting_name <- factor(CRS_prob_pathway_Monocytes_receiver_filter$interacting_name,
+                                                                      levels = rev(c("TNF - TNFRSF1A","TNF - TNFRSF1B","CCL3 - CCR5","CCL3 - CCR1",
+                                                                                     "CCL3L1 - CCR1","CCL4 - CCR5", "CCL5 - CCR5", "CCL5 - CCR1",
+                                                                                     "IL6 - (IL6R+IL6ST)", "IL1B - (IL1R1+IL1RAP)", "IL1B - IL1R2",
+                                                                                     "CD40LG - (ITGAM+ITGB2)", "CD40LG - (ITGA5+ITGB1)",
+                                                                                     "TNFSF13B - TNFRSF13B", "TNFSF13B - TNFRSF13C",
+                                                                                     "GAS6 - AXL", "CSF1 - CSF1R",
+                                                                                     "FGF2 - FGFR1", "FGF2 - FGFR2",
+                                                                                     "GRN - SORT1", "IFNG - (IFNGR1+IFNGR2)")))
+
+p <- ggplot(CRS_prob_pathway_Monocytes_receiver_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_Monocytes_receiver_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_Monocytes_receiver_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_Monocytes_receiver_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_Monocytes_receiver_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_Monocytes_receiver_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+###EndoT cells for FigS3D-E
+#extract EndoT-cells' interactions
+CRS_pval_pathway_EndoT <- CRS_pval_pathway %>% dplyr::filter(str_detect(interacting_cells, "EndoT"))
+CRS_prob_pathway_EndoT <- CRS_prob_pathway %>% dplyr::filter(str_detect(interacting_cells, "EndoT"))
+
+#pivot_longer
+CRS_pval_pathway_EndoT <- CRS_pval_pathway_EndoT %>% pivot_longer(c(`pval_CRSb`,`pval_CRSp`,`pval_CRSr`),names_to = "CRS",values_to = "pval")
+CRS_prob_pathway_EndoT <- CRS_prob_pathway_EndoT %>% pivot_longer(c(`prob_CRSb`,`prob_CRSp`,`prob_CRSr`),names_to = "CRS",values_to = "prob")
+
+#merge prob and pval to one df
+CRS_prob_pathway_EndoT$pval <- CRS_pval_pathway_EndoT$pval
+
+#add stages information to interacting_cells
+CRS_prob_pathway_EndoT <- CRS_prob_pathway_EndoT %>% dplyr::mutate(CRS = str_replace(CRS,"prob_","")) %>%
+  dplyr::mutate(interacting_cells=str_c(interacting_cells,CRS,sep = "_")) %>% dplyr::select(-CRS)
+
+range(CRS_prob_pathway_EndoT[!is.na(CRS_prob_pathway_EndoT$prob),]$prob)#0.00000000 0.01610391
+CRS_prob_pathway_EndoT$logp <- -log10(CRS_prob_pathway_EndoT$pval)
+CRS_prob_pathway_EndoT[CRS_prob_pathway_EndoT$logp > 2 & !is.na(CRS_prob_pathway_EndoT$logp),]$logp <- 2
+
+#EndoT as sender or reciever
+CRS_prob_pathway_EndoT_sender <- CRS_prob_pathway_EndoT %>% dplyr::filter(str_detect(interacting_cells, "^EndoT_"))
+CRS_prob_pathway_EndoT_receiver <- CRS_prob_pathway_EndoT %>% dplyr::filter(str_detect(interacting_cells, "_EndoT_"))
+
+#sender
+CRS_prob_pathway_EndoT_sender$interacting_cells <- factor(CRS_prob_pathway_EndoT_sender$interacting_cells,
+                                                          levels = c("EndoT_EndoT_CRSb","EndoT_EndoT_CRSp","EndoT_EndoT_CRSr",
+                                                                     "EndoT_CART_CRSb","EndoT_CART_CRSp","EndoT_CART_CRSr",
+                                                                     "EndoT_NK_CRSb","EndoT_NK_CRSp","EndoT_NK_CRSr",
+                                                                     "EndoT_Plasma/Tumor_CRSb", "EndoT_Plasma/Tumor_CRSp",
+                                                                     "EndoT_Plasma/Tumor_CRSr","EndoT_Monocytes_CRSb",
+                                                                     "EndoT_Monocytes_CRSp","EndoT_Monocytes_CRSr",
+                                                                     "EndoT_Platelet_CRSb","EndoT_Platelet_CRSp","EndoT_Platelet_CRSr"))
+#receiver
+CRS_prob_pathway_EndoT_receiver$interacting_cells <- factor(CRS_prob_pathway_EndoT_receiver$interacting_cells,
+                                                            levels = c("EndoT_EndoT_CRSb","EndoT_EndoT_CRSp","EndoT_EndoT_CRSr",
+                                                                       "CART_EndoT_CRSb","CART_EndoT_CRSp","CART_EndoT_CRSr",
+                                                                       "NK_EndoT_CRSb","NK_EndoT_CRSp","NK_EndoT_CRSr",
+                                                                       "Plasma/Tumor_EndoT_CRSb", "Plasma/Tumor_EndoT_CRSp",
+                                                                       "Plasma/Tumor_EndoT_CRSr","Monocytes_EndoT_CRSb",
+                                                                       "Monocytes_EndoT_CRSp","Monocytes_EndoT_CRSr",
+                                                                       "Platelet_EndoT_CRSb","Platelet_EndoT_CRSp","Platelet_EndoT_CRSr"))
+
+CRS_prob_pathway_EndoT_sender$probT <- -1/log(CRS_prob_pathway_EndoT_sender$prob)
+CRS_prob_pathway_EndoT_receiver$probT <- -1/log(CRS_prob_pathway_EndoT_receiver$prob)
+
+#FigS3D
+CRS_prob_pathway_EndoT_sender_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                                unique(CRS_prob_pathway_EndoT_sender$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_EndoT_sender_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_EndoT_sender <- CRS_prob_pathway_EndoT_sender %>% left_join(CRS_prob_pathway_EndoT_sender_df,by = "interacting_pairs")
+
+pathways <- c("TNF","IFN","CD40","^IL[1,2,6]","FGF","GAS","FLT","CCL","CSF","GRN","BAFF")
+
+CRS_prob_pathway_EndoT_sender_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_EndoT_sender$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_EndoT_sender,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_EndoT_sender_filter$interacting_name <- factor(CRS_prob_pathway_EndoT_sender_filter$interacting_name,
+                                                                levels = rev(c("CCL5 - CCR5","CCL4 - CCR5","CCL3 - CCR5","CCL5 - CCR1",
+                                                                               "CCL5 - CCR3","CCL3 - CCR1","IL6 - (IL6R+IL6ST)",
+                                                                               "IL7 - (IL7R+IL2RG)","IL2 - (IL2RB+IL2RG)","IL4 - (IL4R+IL2RG)",
+                                                                               "IL15 - (IL15RA+IL2RB)", "IL1B - (IL1R1+IL1RAP)",
+                                                                               "IL1B - IL1R2", "CD40LG - (ITGA5+ITGB1)",
+                                                                               "CD40LG - (ITGAM+ITGB2)", "CD40LG - (ITGA2B+ITGB3)",
+                                                                               "TNFSF13B - TNFRSF13B","TNFSF13B - TNFRSF13C",
+                                                                               "GAS6 - AXL","FLT3L - FLT3", "CSF1 - CSF1R",
+                                                                               "FGF2 - FGFR1","FGF2 - FGFR2", "IFNG - (IFNGR1+IFNGR2)")))
+
+p <- ggplot(CRS_prob_pathway_EndoT_sender_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_EndoT_sender_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_EndoT_sender_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_EndoT_sender_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_EndoT_sender_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_EndoT_sender_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+#FigS3E
+CRS_prob_pathway_EndoT_receiver_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                                  unique(CRS_prob_pathway_EndoT_receiver$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_EndoT_receiver_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_EndoT_receiver <- CRS_prob_pathway_EndoT_receiver %>% left_join(CRS_prob_pathway_EndoT_receiver_df,by = "interacting_pairs")
+
+
+CRS_prob_pathway_EndoT_receiver_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_EndoT_receiver$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_EndoT_receiver,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_EndoT_receiver_filter$interacting_name <- factor(CRS_prob_pathway_EndoT_receiver_filter$interacting_name,
+                                                                  levels = rev(c("TNF - TNFRSF1A","TNF - TNFRSF1B","CCL3 - CCR1","CCL3 - CCR5",
+                                                                                 "CCL5 - CCR3","CCL5 - CCR1", "CCL5 - CCR5", "CCL4 - CCR5",
+                                                                                 "CCL3L1 - CCR1", "IL6 - (IL6R+IL6ST)",
+                                                                                 "IL7 - (IL7R+IL2RG)","IL2 - (IL2RB+IL2RG)","IL4 - (IL4R+IL2RG)",
+                                                                                 "IL15 - (IL15RA+IL2RB)","IL21 - (IL21R+IL2RG)",
+                                                                                 "IL1B - (IL1R1+IL1RAP)","IL1B - IL1R2","CD40LG - (ITGAM+ITGB2)",
+                                                                                 "CD40LG - (ITGA5+ITGB1)","TNFSF13B - TNFRSF13B",
+                                                                                 "TNFSF13B - TNFRSF13C","GAS6 - AXL","FLT3L - FLT3",
+                                                                                 "CSF1 - CSF1R","FGF2 - FGFR1",
+                                                                                 "FGF2 - FGFR2","GRN - SORT1")))
+
+p <- ggplot(CRS_prob_pathway_EndoT_receiver_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_EndoT_receiver_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_EndoT_receiver_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_EndoT_receiver_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_EndoT_receiver_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_EndoT_receiver_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+###NK cells for FigS3F-G
+#extract NK-cells' interactions
+CRS_pval_pathway_NK <- CRS_pval_pathway %>% dplyr::filter(str_detect(interacting_cells, "NK"))
+CRS_prob_pathway_NK <- CRS_prob_pathway %>% dplyr::filter(str_detect(interacting_cells, "NK"))
+
+#pivot_longer
+CRS_pval_pathway_NK <- CRS_pval_pathway_NK %>% pivot_longer(c(`pval_CRSb`,`pval_CRSp`,`pval_CRSr`),names_to = "CRS",values_to = "pval")
+CRS_prob_pathway_NK <- CRS_prob_pathway_NK %>% pivot_longer(c(`prob_CRSb`,`prob_CRSp`,`prob_CRSr`),names_to = "CRS",values_to = "prob")
+
+#merge prob and pval to one df
+CRS_prob_pathway_NK$pval <- CRS_pval_pathway_NK$pval
+
+#add stages information to interacting_cells
+CRS_prob_pathway_NK <- CRS_prob_pathway_NK %>% dplyr::mutate(CRS = str_replace(CRS,"prob_","")) %>%
+  dplyr::mutate(interacting_cells=str_c(interacting_cells,CRS,sep = "_")) %>% dplyr::select(-CRS)
+
+range(CRS_prob_pathway_NK[!is.na(CRS_prob_pathway_NK$prob),]$prob)#0.00000000 0.003815966
+CRS_prob_pathway_NK$logp <- -log10(CRS_prob_pathway_NK$pval)
+CRS_prob_pathway_NK[CRS_prob_pathway_NK$logp > 2 & !is.na(CRS_prob_pathway_NK$logp),]$logp <- 2
+
+#NK as sender or reciever
+CRS_prob_pathway_NK_sender <- CRS_prob_pathway_NK %>% dplyr::filter(str_detect(interacting_cells, "^NK_"))
+CRS_prob_pathway_NK_receiver <- CRS_prob_pathway_NK %>% dplyr::filter(str_detect(interacting_cells, "_NK_"))
+
+#sender
+CRS_prob_pathway_NK_sender$interacting_cells <- factor(CRS_prob_pathway_NK_sender$interacting_cells,
+                                                       levels = c("NK_NK_CRSb","NK_NK_CRSp","NK_NK_CRSr",
+                                                                  "NK_CART_CRSb","NK_CART_CRSp","NK_CART_CRSr",
+                                                                  "NK_EndoT_CRSb","NK_EndoT_CRSp","NK_EndoT_CRSr",
+                                                                  "NK_Plasma/Tumor_CRSb", "NK_Plasma/Tumor_CRSp",
+                                                                  "NK_Plasma/Tumor_CRSr","NK_Monocytes_CRSb",
+                                                                  "NK_Monocytes_CRSp","NK_Monocytes_CRSr",
+                                                                  "NK_Platelet_CRSb","NK_Platelet_CRSp","NK_Platelet_CRSr"))
+#receiver
+CRS_prob_pathway_NK_receiver$interacting_cells <- factor(CRS_prob_pathway_NK_receiver$interacting_cells,
+                                                         levels = c("NK_NK_CRSb","NK_NK_CRSp","NK_NK_CRSr",
+                                                                    "CART_NK_CRSb","CART_NK_CRSp","CART_NK_CRSr",
+                                                                    "EndoT_NK_CRSb","EndoT_NK_CRSp","EndoT_NK_CRSr",
+                                                                    "Plasma/Tumor_NK_CRSb", "Plasma/Tumor_NK_CRSp",
+                                                                    "Plasma/Tumor_NK_CRSr","Monocytes_NK_CRSb",
+                                                                    "Monocytes_NK_CRSp","Monocytes_NK_CRSr",
+                                                                    "Platelet_NK_CRSb","Platelet_NK_CRSp","Platelet_NK_CRSr"))
+
+CRS_prob_pathway_NK_sender$probT <- -1/log(CRS_prob_pathway_NK_sender$prob)
+CRS_prob_pathway_NK_receiver$probT <- -1/log(CRS_prob_pathway_NK_receiver$prob)
+
+#FigS3F
+CRS_prob_pathway_NK_sender_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                             unique(CRS_prob_pathway_NK_sender$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_NK_sender_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_NK_sender <- CRS_prob_pathway_NK_sender %>% left_join(CRS_prob_pathway_NK_sender_df,by = "interacting_pairs")
+
+pathways <- c("TNF","IFN","CD40","^IL[1,2,6]","FGF","GAS","FLT","CCL","CSF","GRN","BAFF")
+
+CRS_prob_pathway_NK_sender_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_NK_sender$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_NK_sender,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_NK_sender_filter$interacting_name <- factor(CRS_prob_pathway_NK_sender_filter$interacting_name,
+                                                             levels = rev(c("CCL3 - CCR5","CCL3 - CCR1","CCL4 - CCR5","CCL5 - CCR1",
+                                                                            "CCL5 - CCR5","CCL5 - CCR3","IL6 - (IL6R+IL6ST)",
+                                                                            "IL15 - (IL15RA+IL2RB)","IL2 - (IL2RB+IL2RG)","IL4 - (IL4R+IL2RG)",
+                                                                            "IL7 - (IL7R+IL2RG)", "IL1B - (IL1R1+IL1RAP)",
+                                                                            "IL1B - IL1R2", "CD40LG - (ITGA5+ITGB1)",
+                                                                            "CD40LG - (ITGAM+ITGB2)", "CD40LG - (ITGA2B+ITGB3)",
+                                                                            "TNFSF13B - TNFRSF13B","TNFSF13B - TNFRSF13C",
+                                                                            "GAS6 - AXL","FLT3L - FLT3", "CSF1 - CSF1R",
+                                                                            "FGF2 - FGFR1","FGF2 - FGFR2", "IFNG - (IFNGR1+IFNGR2)")))
+
+p <- ggplot(CRS_prob_pathway_NK_sender_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_NK_sender_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_NK_sender_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_NK_sender_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_NK_sender_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_NK_sender_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+#FigS3G
+CRS_prob_pathway_NK_receiver_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                               unique(CRS_prob_pathway_NK_receiver$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_NK_receiver_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_NK_receiver <- CRS_prob_pathway_NK_receiver %>% left_join(CRS_prob_pathway_NK_receiver_df,by = "interacting_pairs")
+
+CRS_prob_pathway_NK_receiver_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_NK_receiver$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_NK_receiver,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_NK_receiver_filter$interacting_name <- factor(CRS_prob_pathway_NK_receiver_filter$interacting_name,
+                                                               levels = rev(c("TNF - TNFRSF1A","TNF - TNFRSF1B","CCL3 - CCR1","CCL3 - CCR5",
+                                                                              "CCL4 - CCR5","CCL5 - CCR1", "CCL5 - CCR3", "CCL5 - CCR5",
+                                                                              "CCL3L1 - CCR1", "IL6 - (IL6R+IL6ST)", "IL15 - (IL15RA+IL2RB)",
+                                                                              "IL2 - (IL2RB+IL2RG)", "IL4 - (IL4R+IL2RG)","IL7 - (IL7R+IL2RG)",
+                                                                              "IL1B - (IL1R1+IL1RAP)","IL1B - IL1R2",
+                                                                              "CD40LG - (ITGAM+ITGB2)", "CD40LG - (ITGA5+ITGB1)",
+                                                                              "TNFSF13B - TNFRSF13B", "TNFSF13B - TNFRSF13C",
+                                                                              "GAS6 - AXL","FLT3L - FLT3",
+                                                                              "CSF1 - CSF1R","FGF2 - FGFR1",
+                                                                              "FGF2 - FGFR2","GRN - SORT1")))
+
+p <- ggplot(CRS_prob_pathway_NK_receiver_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_NK_receiver_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_NK_receiver_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_NK_receiver_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_NK_receiver_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_NK_receiver_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+
+###Tumor cells for FigS3H-I
+#extract Tumor-cells' interactions
+CRS_pval_pathway_Tumor <- CRS_pval_pathway %>% dplyr::filter(str_detect(interacting_cells, "Plasma/Tumor"))
+CRS_prob_pathway_Tumor <- CRS_prob_pathway %>% dplyr::filter(str_detect(interacting_cells, "Plasma/Tumor"))
+
+#pivot_longer
+CRS_pval_pathway_Tumor <- CRS_pval_pathway_Tumor %>% pivot_longer(c(`pval_CRSb`,`pval_CRSp`,`pval_CRSr`),names_to = "CRS",values_to = "pval")
+CRS_prob_pathway_Tumor <- CRS_prob_pathway_Tumor %>% pivot_longer(c(`prob_CRSb`,`prob_CRSp`,`prob_CRSr`),names_to = "CRS",values_to = "prob")
+
+#merge prob and pval to one df
+CRS_prob_pathway_Tumor$pval <- CRS_pval_pathway_Tumor$pval
+
+#add stages information to interacting_cells
+CRS_prob_pathway_Tumor <- CRS_prob_pathway_Tumor %>% dplyr::mutate(CRS = str_replace(CRS,"prob_","")) %>%
+  dplyr::mutate(interacting_cells=str_c(interacting_cells,CRS,sep = "_")) %>% dplyr::select(-CRS)
+
+range(CRS_prob_pathway_Tumor[!is.na(CRS_prob_pathway_Tumor$prob),]$prob)#0.00000000 9.812085e-05
+CRS_prob_pathway_Tumor$logp <- -log10(CRS_prob_pathway_Tumor$pval)
+CRS_prob_pathway_Tumor[CRS_prob_pathway_Tumor$logp > 2 & !is.na(CRS_prob_pathway_Tumor$logp),]$logp <- 2
+
+#NK as sender or reciever
+CRS_prob_pathway_Tumor_sender <- CRS_prob_pathway_Tumor %>% dplyr::filter(str_detect(interacting_cells, "^Plasma/Tumor_"))
+CRS_prob_pathway_Tumor_receiver <- CRS_prob_pathway_Tumor %>% dplyr::filter(str_detect(interacting_cells, "_Plasma/Tumor_"))
+
+#sender
+CRS_prob_pathway_Tumor_sender$interacting_cells <- factor(CRS_prob_pathway_Tumor_sender$interacting_cells,
+                                                          levels = c("Plasma/Tumor_Plasma/Tumor_CRSb","Plasma/Tumor_Plasma/Tumor_CRSp",
+                                                                     "Plasma/Tumor_Plasma/Tumor_CRSr", "Plasma/Tumor_CART_CRSb",
+                                                                     "Plasma/Tumor_CART_CRSp","Plasma/Tumor_CART_CRSr","Plasma/Tumor_EndoT_CRSb",
+                                                                     "Plasma/Tumor_EndoT_CRSp","Plasma/Tumor_EndoT_CRSr","Plasma/Tumor_NK_CRSb",
+                                                                     "Plasma/Tumor_NK_CRSp", "Plasma/Tumor_NK_CRSr", "Plasma/Tumor_Monocytes_CRSb",
+                                                                     "Plasma/Tumor_Monocytes_CRSp","Plasma/Tumor_Monocytes_CRSr",
+                                                                     "Plasma/Tumor_Platelet_CRSb","Plasma/Tumor_Platelet_CRSp",
+                                                                     "Plasma/Tumor_Platelet_CRSr"))
+#receiver
+CRS_prob_pathway_Tumor_receiver$interacting_cells <- factor(CRS_prob_pathway_Tumor_receiver$interacting_cells,
+                                                            levels = c("Plasma/Tumor_Plasma/Tumor_CRSb","Plasma/Tumor_Plasma/Tumor_CRSp",
+                                                                       "Plasma/Tumor_Plasma/Tumor_CRSr", "CART_Plasma/Tumor_CRSb",
+                                                                       "CART_Plasma/Tumor_CRSp","CART_Plasma/Tumor_CRSr","EndoT_Plasma/Tumor_CRSb",
+                                                                       "EndoT_Plasma/Tumor_CRSp","EndoT_Plasma/Tumor_CRSr","NK_Plasma/Tumor_CRSb",
+                                                                       "NK_Plasma/Tumor_CRSp", "NK_Plasma/Tumor_CRSr", "Monocytes_Plasma/Tumor_CRSb",
+                                                                       "Monocytes_Plasma/Tumor_CRSp","Monocytes_Plasma/Tumor_CRSr",
+                                                                       "Monocytes_NK_CRSp","Monocytes_NK_CRSr",
+                                                                       "Platelet_NK_CRSb","Platelet_NK_CRSp","Platelet_NK_CRSr"))
+
+CRS_prob_pathway_Tumor_sender$probT <- -1/log(CRS_prob_pathway_Tumor_sender$prob)
+CRS_prob_pathway_Tumor_receiver$probT <- -1/log(CRS_prob_pathway_Tumor_receiver$prob)
+
+#FigS3H
+CRS_prob_pathway_Tumor_sender_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                                unique(CRS_prob_pathway_Tumor_sender$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_Tumor_sender_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_Tumor_sender <- CRS_prob_pathway_Tumor_sender %>% left_join(CRS_prob_pathway_Tumor_sender_df,by = "interacting_pairs")
+
+pathways <- c("TNF","IFN","CD40","^IL[1,2,6]","FGF","GAS","FLT","CCL","CSF","GRN","BAFF")
+
+CRS_prob_pathway_Tumor_sender_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_Tumor_sender$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_Tumor_sender,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_Tumor_sender_filter$interacting_name <- factor(CRS_prob_pathway_Tumor_sender_filter$interacting_name,
+                                                                levels = rev(c("CCL3 - CCR5","CCL3 - CCR1","CCL4 - CCR5","CCL5 - CCR1",
+                                                                               "CCL5 - CCR5","CCL5 - CCR3","IL6 - (IL6R+IL6ST)",
+                                                                               "IL15 - (IL15RA+IL2RB)","IL2 - (IL2RB+IL2RG)","IL4 - (IL4R+IL2RG)",
+                                                                               "IL7 - (IL7R+IL2RG)", "IL1B - (IL1R1+IL1RAP)",
+                                                                               "IL1B - IL1R2", "CD40LG - (ITGA5+ITGB1)",
+                                                                               "CD40LG - (ITGAM+ITGB2)", "CD40LG - (ITGA2B+ITGB3)",
+                                                                               "TNFSF13B - TNFRSF13B","TNFSF13B - TNFRSF13C",
+                                                                               "GAS6 - AXL","FLT3L - FLT3", "CSF1 - CSF1R",
+                                                                               "FGF2 - FGFR1","FGF2 - FGFR2", "IFNG - (IFNGR1+IFNGR2)")))
+
+p <- ggplot(CRS_prob_pathway_Tumor_sender_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_Tumor_sender_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_Tumor_sender_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_Tumor_sender_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_Tumor_sender_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_Tumor_sender_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
+
+#FigS3I
+CRS_prob_pathway_Tumor_receiver_df <- cellchatdg@DB$interaction[cellchatdg@DB$interaction$interaction_name %in%
+                                                                  unique(CRS_prob_pathway_Tumor_receiver$interacting_pairs),][,c(1,2,11)]
+colnames(CRS_prob_pathway_Tumor_receiver_df) <- c("interacting_pairs","pathway_name","interacting_name")
+CRS_prob_pathway_Tumor_receiver <- CRS_prob_pathway_Tumor_receiver %>% left_join(CRS_prob_pathway_Tumor_receiver_df,by = "interacting_pairs")
+
+
+CRS_prob_pathway_Tumor_receiver_filter <- pathways %>% map(~str_detect(CRS_prob_pathway_Tumor_receiver$pathway_name, pattern = .x)) %>%
+  map(~dplyr::filter(CRS_prob_pathway_Tumor_receiver,.x)) %>% bind_rows() %>% distinct()
+
+
+CRS_prob_pathway_Tumor_receiver_filter$interacting_name <- factor(CRS_prob_pathway_Tumor_receiver_filter$interacting_name,
+                                                                  levels = rev(c("TNF - TNFRSF1A","TNF - TNFRSF1B","CCL3 - CCR1","CCL3 - CCR5",
+                                                                                 "CCL4 - CCR5","CCL5 - CCR1", "CCL5 - CCR3", "CCL5 - CCR5",
+                                                                                 "CCL3L1 - CCR1", "IL6 - (IL6R+IL6ST)", "IL15 - (IL15RA+IL2RB)",
+                                                                                 "IL2 - (IL2RB+IL2RG)", "IL4 - (IL4R+IL2RG)","IL7 - (IL7R+IL2RG)",
+                                                                                 "IL1B - (IL1R1+IL1RAP)","IL1B - IL1R2",
+                                                                                 "CD40LG - (ITGAM+ITGB2)", "CD40LG - (ITGA5+ITGB1)",
+                                                                                 "TNFSF13B - TNFRSF13B", "TNFSF13B - TNFRSF13C",
+                                                                                 "GAS6 - AXL","FLT3L - FLT3",
+                                                                                 "CSF1 - CSF1R","FGF2 - FGFR1",
+                                                                                 "FGF2 - FGFR2","GRN - SORT1")))
+
+p <- ggplot(CRS_prob_pathway_Tumor_receiver_filter, aes(interacting_cells, interacting_name)) +
+  geom_point(aes(color=probT, size=logp)) +#scale_colour_gradient2(low = "gold",mid="red", high = "darkred",midpoint = 0.0025)
+  scale_colour_gradientn(colors = colorRampPalette(cols)(99),limits =
+                           c(quantile(CRS_prob_pathway_Tumor_receiver_filter$probT,0, na.rm = T),
+                             quantile(CRS_prob_pathway_Tumor_receiver_filter$probT, 1, na.rm = T)),
+                         breaks = c(quantile(CRS_prob_pathway_Tumor_receiver_filter$probT, 0, na.rm = T),
+                                    quantile(CRS_prob_pathway_Tumor_receiver_filter$probT, 1, na.rm = T)),
+                         labels = c("min", "max"))+ theme_set(theme_bw()) +
+  theme(panel.grid.major=element_line(colour=NA),axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5)) +
+  scale_size(breaks = c(0.0,0.5,1.0,1.5,2.0), range = c(1,3))
+pdf(file = "lx_CRS_prob_pathway_Tumor_receiver_filter.pdf",height= 7,width=5)
+print(p)
+dev.off()
